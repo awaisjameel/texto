@@ -1,12 +1,12 @@
 <?php
 
-namespace VendorName\Skeleton\Commands;
+namespace Awaisjameel\Texto\Commands;
 
 use Illuminate\Console\Command;
 
-class SkeletonCommand extends Command
+class TextoCommand extends Command
 {
-    public $signature = 'skeleton';
+    public $signature = 'texto';
 
     public $description = 'My command';
 
