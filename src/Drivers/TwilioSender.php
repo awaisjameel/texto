@@ -289,7 +289,7 @@ class TwilioSender implements MessageSenderInterface
             'types' => [
                 'twilio/media' => [
                     'body' => '{{message_body_1}}{{message_body_2}}{{message_body_3}}{{message_body_4}}{{message_body_5}}',
-                    'media' => ['https://placehold.co/{{media_path}}'],
+                    'media' => [env('APP_URL').'/{{media_path}}'],
                 ],
             ],
         ];
