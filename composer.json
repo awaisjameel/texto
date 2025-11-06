@@ -10,7 +10,8 @@
         "mms",
         "twilio",
         "telnyx",
-        "messaging"
+        "messaging",
+        "messages"
     ],
     "homepage": "https://github.com/awaisjameel/texto",
     "license": "MIT",

@@ -1,306 +1,513 @@
+<div align="center">
+
 # Texto
 
-**Unified, extendable Laravel gateway for sending & receiving SMS/MMS via Twilio and Telnyx (Laravel 10+, PHP 7.4 || 8.2+)**
+`<strong>`Unified, extensible Laravel gateway for sending & receiving SMS/MMS over Twilio & Telnyx.`<br/>`Batteries included: queueing, retries, events, webhooks, polling, typed value objects.`</strong>`
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/awaisjameel/texto.svg?style=flat-square)](https://packagist.org/packages/awaisjameel/texto)
 [![Tests](https://img.shields.io/github/actions/workflow/status/awaisjameel/texto/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/awaisjameel/texto/actions?query=workflow%3Atests+branch%3Amain)
 [![Downloads](https://img.shields.io/packagist/dt/awaisjameel/texto.svg?style=flat-square)](https://packagist.org/packages/awaisjameel/texto)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE.md)
 
-Texto provides a clean SOLID API for sending and receiving SMS/MMS messages. It abstracts provider differences (Twilio, Telnyx) with a driver system that you can easily extend. It stores sent & inbound messages, processes delivery status webhooks, dispatches rich Laravel events, supports queue-based async sending, retry/backoff, and secure webhook validation.
+</div>
+
+Texto gives you a cohesive abstraction for carrier‑grade messaging in Laravel 10–12 (PHP 7.4 / 8.2+). It normalizes provider differences (Twilio, Telnyx) behind a small set of contracts and value objects, persists sent & inbound messages, securely processes delivery status notifications, and offers a rich event surface for further automation. Advanced niceties include Twilio Conversations + Content Template auto‑provisioning, exponential retry, opt‑in status polling (for when webhooks lag), and a plug‑and‑play driver extension API.
 
 ---
 
-## Features
+## Table of Contents
 
--   SMS & MMS sending via Twilio or Telnyx (drivers)
--   Inbound message webhook handling & storage
--   Delivery status tracking (delivered / failed / queued / sent)
--   Automatic retry with exponential backoff (configurable)
--   Optional queued sending (`queue=true`)
--   Events: `MessageSent`, `MessageReceived`, `MessageFailed`, `MessageStatusUpdated`
--   Extendable driver registration via `Texto::extend()`
--   Strong typing: enums, value objects (`PhoneNumber`), strict types
--   Security: signature validation, optional shared secret header, rate limiting middleware
--   Configurable persistence (disable with `store_messages=false`)
--   CI ready (PHPStan, Pint, Pest)
+1. Motivation & Philosophy
+2. Feature Overview
+3. Quick Start
+4. Installation
+5. Configuration (`config/texto.php`)
+6. Usage Examples
+7. Queueing & Async Flow
+8. Events & Observability
+9. Data Model & Persistence
+10. Webhooks (Inbound + Status)
+11. Security (Signatures, Secrets, Rate Limiting)
+12. Status Polling (Adaptive Fallback)
+13. Retry & Backoff Strategy
+14. Twilio Conversations & Content Templates
+15. Extending / Custom Drivers
+16. Value Objects & Enums
+17. Console Commands
+18. Testing, Fakes & Local Development
+19. Architecture Overview
+20. Troubleshooting & FAQ
+21. Roadmap
+22. Contributing
+23. Security Policy
+24. License & Credits
 
 ---
 
-## Support us
+## 1. Motivation & Philosophy
 
-If you find this package useful, consider supporting its development make sure to give a star on GitHub!
+Messaging APIs differ subtly (parameters, status taxonomies, webhook formats, content templating). Ad‑hoc conditionals quickly devolve into brittle code. Texto centralizes those concerns:
 
-## 1. Installation
+-   Strong typing (enums + value objects) to surface intent & reduce mistakes.
+-   Separation of concerns: drivers focus on provider logic; repository persists; mapper normalizes status.
+-   Extensibility first: `DriverManager::extend()` lets you bolt in new providers cleanly.
+-   Observability: comprehensive events, metadata capture, structured logging.
+-   Graceful degradation: queueing, retries, fallback polling if webhooks are late / disabled.
+-   Security posture: signature validation + shared secret + rate limiting middleware.
 
-Install via Composer:
+---
+
+## 2. Feature Overview
+
+-   SMS + MMS send (Twilio & Telnyx drivers)
+-   Inbound message capture & storage
+-   Delivery status tracking via webhooks + optional polling
+-   Queue based async sends (returns immediate queued placeholder)
+-   Exponential retry wrapper for transient upstream failures
+-   Twilio Conversations + Content template flow (auto create / reuse templates)
+-   Telnyx rich metadata (cost, parts) captured into message metadata
+-   Structured events: `MessageSent`, `MessageReceived`, `MessageFailed`, `MessageStatusUpdated`
+-   Status normalization layer (`StatusMapper`)
+-   Strong domain primitives (`PhoneNumber`, `SentMessageResult`)
+-   Extensible driver registration at runtime
+-   Secure webhook processing (Twilio signature; Telnyx placeholder + shared secret header)
+-   Rate limiting middleware + optional shared secret header `X-Texto-Secret`
+-   Status polling job with intelligent promotion rules & ambiguity handling
+-   Deterministic upgrade of queued DB rows when async job completes
+-   CI ready (Pest + PHPStan + Pint)
+
+---
+
+## 3. Quick Start
 
 ```bash
 composer require awaisjameel/texto
+php artisan texto:install   # publishes config + migration & runs migrate
+
+php artisan texto:test-send +15551234567 "Hello from Texto"
 ```
-
-Publish and run the migrations:
-
-```bash
-php artisan vendor:publish --tag="texto-migrations"
-php artisan migrate
-```
-
-Publish the config file:
-
-```bash
-php artisan vendor:publish --tag="texto-config"
-```
-
-Environment variables (add to `.env`):
-
-```env
-TEXTO_DRIVER=twilio               # or telnyx
-TEXTO_STORE_MESSAGES=true
-TEXTO_QUEUE=false                 # enable to queue sending
-TEXTO_RETRY_ATTEMPTS=3
-TEXTO_RETRY_BACKOFF_START=200
-TEXTO_WEBHOOK_SECRET=your-shared-secret   # optional extra security
-TEXTO_DEFAULT_REGION=US
-
-TWILIO_ACCOUNT_SID=xxx
-TWILIO_AUTH_TOKEN=xxx
-TWILIO_FROM_NUMBER=+15550001111
-
-TELNYX_API_KEY=xxx
-TELNYX_MESSAGING_PROFILE_ID=xxx
-TELNYX_FROM_NUMBER=+15550002222
-```
-
-Views are not required for core messaging (placeholder only).
-
----
-
-## 2. Configuration Overview
-
-`config/texto.php` key sections:
-
--   `driver`: active driver (`twilio` | `telnyx`)
--   `store_messages`: persist to `texto_messages`
--   `queue`: async sending via `SendMessageJob`
--   `retry`: `max_attempts`, `backoff_start_ms`
--   `webhook.secret`: shared secret header (`X-Texto-Secret`)
--   `webhook.rate_limit`: per-minute rate limit for webhook endpoints
--   `validation.region`: default region for parsing non E.164 numbers
-
----
-
-## 3. Usage
-
-### 3.1 Basic Send
 
 ```php
-use Texto; // facade alias
+use Texto; // facade alias configured automatically
 
 Texto::send('+15551234567', 'Hello world');
 ```
 
-### 3.2 MMS / Media
+---
+
+## 4. Installation
+
+Manual publish steps if you prefer granular control:
+
+```bash
+composer require awaisjameel/texto
+php artisan vendor:publish --tag=texto-config
+php artisan vendor:publish --tag=texto-migrations
+php artisan migrate
+```
+
+### Environment Variables
+
+```env
+# Core
+TEXTO_DRIVER=twilio                 # twilio | telnyx
+TEXTO_STORE_MESSAGES=true           # disable to skip DB persistence
+TEXTO_QUEUE=false                   # true => SendMessageJob async
+TEXTO_RETRY_ATTEMPTS=3
+TEXTO_RETRY_BACKOFF_START=200       # ms
+TEXTO_WEBHOOK_SECRET=               # optional shared secret header
+TEXTO_DEFAULT_REGION=US             # for parsing non-E.164 input
+
+# Status polling (optional)
+TEXTO_STATUS_POLL_ENABLED=false
+TEXTO_STATUS_POLL_MIN_AGE=60
+TEXTO_STATUS_POLL_MAX_ATTEMPTS=5
+TEXTO_STATUS_POLL_QUEUED_MAX_ATTEMPTS=2
+TEXTO_STATUS_POLL_BACKOFF=300
+TEXTO_STATUS_POLL_BATCH=100
+
+# Twilio
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+TWILIO_FROM_NUMBER=+15550001111
+TWILIO_USE_CONVERSATIONS=true
+TWILIO_SMS_TEMPLATE_FRIENDLY_NAME=texto_sms_template
+TWILIO_MMS_TEMPLATE_FRIENDLY_NAME=texto_mms_template
+TWILIO_CONVERSATION_PREFIX=Texto
+TWILIO_CONVERSATION_WEBHOOK_URL=    # optional override
+
+# Telnyx
+TELNYX_API_KEY=...
+TELNYX_MESSAGING_PROFILE_ID=...
+TELNYX_FROM_NUMBER=+15550002222
+```
+
+---
+
+## 5. Configuration Highlights (`config/texto.php`)
+
+| Key                                             | Purpose                                         |
+| ----------------------------------------------- | ----------------------------------------------- |
+| `driver`                                        | Active provider driver (enum `Driver::Twilio    |
+| `store_messages`                                | Toggle DB persistence (table `texto_messages`). |
+| `queue`                                         | Enable async dispatch via `SendMessageJob`.     |
+| `retry.max_attempts` / `retry.backoff_start_ms` | Exponential retry parameters.                   |
+| `webhook.secret`                                | Shared secret header (`X-Texto-Secret`).        |
+| `webhook.rate_limit`                            | Per‑minute throttle for webhook routes.         |
+| `validation.region`                             | Default region for parsing raw numbers.         |
+| `status_polling.*`                              | Polling strategy & limits.                      |
+| `twilio.*`                                      | Conversations + content template settings.      |
+| `telnyx.*`                                      | API key, profile id, default from.              |
+
+---
+
+## 6. Usage Examples
+
+### Basic Send
+
+```php
+Texto::send('+15551234567', 'Hello world');
+```
+
+### With Media (MMS)
 
 ```php
 Texto::send('+15551234567', 'Check this out', [
-	'media_urls' => ['https://example.com/image.jpg']
+    'media_urls' => ['https://example.com/image.jpg']
 ]);
 ```
 
-### 3.3 Driver Override Per Message
+### Override Driver Per Message
 
 ```php
-Texto::send('+15551234567', 'Testing Telnyx', [
-	'driver' => 'telnyx'
+Texto::send('+15551234567', 'Via Telnyx now', ['driver' => 'telnyx']);
+```
+
+### Custom From Number / Metadata
+
+```php
+Texto::send('+15551234567', 'Branded', [
+    'from' => '+15550009999',
+    'metadata' => ['campaign' => 'spring_launch']
 ]);
 ```
 
-### 3.4 Queued Sending
+### Queued Mode
 
-Enable `TEXTO_QUEUE=true`. Then `Texto::send()` returns a queued placeholder (status `queued`). Ensure a queue worker is running:
-
-```bash
-php artisan queue:work
-```
-
-### 3.5 Events
-
-Listen in `EventServiceProvider`:
+Enable `TEXTO_QUEUE=true` then:
 
 ```php
-protected $listen = [
-	\Awaisjameel\Texto\Events\MessageSent::class => [/* listeners */],
-	\Awaisjameel\Texto\Events\MessageReceived::class => [],
-	\Awaisjameel\Texto\Events\MessageFailed::class => [],
-	\Awaisjameel\Texto\Events\MessageStatusUpdated::class => [],
-];
+$result = Texto::send('+15551234567', 'Async hello');
+// $result->status === MessageStatus::Queued
 ```
 
-### 3.6 Accessing Stored Messages
+Run a worker: `php artisan queue:work`.
 
-```php
-use Awaisjameel\Texto\Models\Message;
+### Returned Value Object
 
-$recent = Message::latest()->take(10)->get();
-```
+`SentMessageResult` implements `Responsable` + `JsonSerializable` so you can directly `return Texto::send(...);` from a controller.
 
 ---
 
-## 4. Webhooks
+## 7. Queueing & Async Flow
 
-Routes (auto-registered):
+1. In queue mode, `Texto::send()` stores a queued row (status `queued`).
+2. Dispatches `SendMessageJob` with deterministic primary key.
+3. Job invokes `Texto::send(... ['queued_job'=>true,'queued_message_id'=>X])` to perform real API send.
+4. Repository upgrades the exact queued record (no racey pattern matching).
+5. Status webhooks or polling complete remaining transitions.
 
--   Inbound: `/texto/webhook/twilio`, `/texto/webhook/telnyx`
--   Status: `/texto/webhook/twilio/status`, `/texto/webhook/telnyx/status`
-
-Configure these in Twilio/Telnyx consoles pointing to your domain. Include the `X-Texto-Secret` header if configured.
-
-### 4.1 Security
-
--   Twilio signature validation via `RequestValidator` (skippable in tests)
--   Telnyx signature placeholder (extend when you add secret validation)
--   Optional shared secret header `X-Texto-Secret`
--   Rate limiting middleware (configurable per minute)
+Benefits: immediate API responses, backpressure via Laravel queue, deterministic DB state.
 
 ---
 
-## 5. Extending Drivers
+## 8. Events & Observability
 
-```php
-use Awaisjameel\Texto\Contracts\MessageSenderInterface;
-use Awaisjameel\Texto\ValueObjects\{PhoneNumber, SentMessageResult};
-use Awaisjameel\Texto\Enums\{Driver, Direction, MessageStatus};
+| Event                  | Fired When                                    | Payload                            |
+| ---------------------- | --------------------------------------------- | ---------------------------------- |
+| `MessageSent`          | Successful provider send                      | `SentMessageResult`                |
+| `MessageFailed`        | Send attempt threw `TextoSendFailedException` | `SentMessageResult`, error message |
+| `MessageReceived`      | Inbound webhook parsed                        | `WebhookProcessingResult`          |
+| `MessageStatusUpdated` | Stored message status mutated (webhook)       | `WebhookProcessingResult`          |
 
-Texto::extend('custom', function () {
-	return new class implements MessageSenderInterface {
-		public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult {
-			// Implement API call...
-			return new SentMessageResult(
-				Driver::Twilio, // or define a new enum case if you fork
-				Direction::Sent,
-				$to,
-				$from,
-				$body,
-				$mediaUrls,
-				$metadata,
-				MessageStatus::Sent,
-				'custom-123',
-			);
-		}
-	};
-});
-```
+Subscribe in `EventServiceProvider` or use listeners/jobs for analytics, billing, triggers.
+
+Structured logging is emitted at `info` / `debug` levels for sends, polling promotions, template initialization, and failures.
 
 ---
 
-## 6. Retry & Backoff
-
-Configured via `retry.max_attempts` and `retry.backoff_start_ms`. Each attempt doubles the delay. Exceptions bubble with `TextoSendFailedException`.
-
----
-
-## 7. Testing & Fakes
-
-Use the included `FakeSender` driver for isolated tests:
-
-```php
-app(\Awaisjameel\Texto\Contracts\DriverManagerInterface::class)
-	->extend('twilio', fn() => new \Awaisjameel\Texto\Drivers\FakeSender());
-```
-
-Run the suite:
-
-```bash
-composer test
-```
-
----
-
-## 8. Data Model
+## 9. Data Model & Persistence
 
 Table: `texto_messages`
 
-| Column                                    | Notes                                        |
-| ----------------------------------------- | -------------------------------------------- |
-| direction                                 | `sent` or `received`                         |
-| driver                                    | `twilio` / `telnyx`                          |
-| from_number / to_number                   | E.164 strings                                |
-| body                                      | Text body (nullable inbound when media only) |
-| media_urls                                | JSON array of media URLs                     |
-| status                                    | Current status (enum values)                 |
-| provider_message_id                       | Twilio SID / Telnyx ID                       |
-| error_code                                | Provider error code if failed                |
-| metadata                                  | Arbitrary JSON                               |
-| sent_at / received_at / status_updated_at | Timestamps                                   |
+| Column                                    | Notes                                                                                        |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| direction                                 | `sent` / `received`                                                                          |
+| driver                                    | `twilio` / `telnyx`                                                                          |
+| from_number / to_number                   | E.164 formatted                                                                              |
+| body                                      | Nullable for pure media inbound                                                              |
+| media_urls                                | JSON array                                                                                   |
+| status                                    | Normalized enum (queued, sending, sent, delivered, failed, undelivered, received, ambiguous) |
+| provider_message_id                       | SID / Telnyx ID (nullable until known)                                                       |
+| error_code                                | Provider error (if any)                                                                      |
+| segments_count                            | (Telnyx) part count                                                                          |
+| cost_estimate                             | (Telnyx) estimated cost                                                                      |
+| metadata                                  | Arbitrary JSON (includes polling counters, conversation info)                                |
+| sent_at / received_at / status_updated_at | Timestamps                                                                                   |
+
+`Ambiguous` terminal state occurs when polling exhausts attempts without a provider id or final disposition.
 
 ---
 
-## 9. Roadmap / Future Ideas
+## 10. Webhooks
 
--   Multi-driver failover & weighted routing
--   Additional providers (MessageBird, Vonage, etc.)
--   Template/content API helpers
--   Bulk sending & batching
+Auto‑registered routes (POST):
 
----
+| Purpose | Twilio                                  | Telnyx                         |
+| ------- | --------------------------------------- | ------------------------------ |
+| Inbound | `/texto/webhook/twilio`                 | `/texto/webhook/telnyx`        |
+| Status  | (status combined in inbound for Twilio) | `/texto/webhook/telnyx/status` |
 
-## 10. Contributing
+Twilio combines inbound + status; for status callbacks it sends `MessageStatus` / `MessageSid` which Texto detects first.
 
-PRs welcome. Please:
+Each request passes through:
 
-1. Run `composer analyse && composer format`.
-2. Include tests for new behavior.
-3. Document public changes in README + CHANGELOG.
+1. `VerifyTextoWebhookSecret` – matches `X-Texto-Secret` (if configured).
+2. `RateLimitTextoWebhook` – per‑minute throttle (`webhook.rate_limit`).
+
+Inbound payloads are normalized into `WebhookProcessingResult` then persisted via `EloquentMessageRepository`.
 
 ---
 
 ## 11. Security
 
-Report vulnerabilities via GitHub Security Advisories. Avoid posting sensitive logs in issues.
+| Mechanism            | Description                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| Twilio Signature     | Validated via `RequestValidator` unless `TEXTO_TESTING_SKIP_WEBHOOK_VALIDATION` in testing. |
+| Telnyx Signature     | Placeholder (extend handler to add HMAC verification).                                      |
+| Shared Secret Header | Add `TEXTO_WEBHOOK_SECRET` and send header `X-Texto-Secret`.                                |
+| Rate Limiting        | Middleware prevents abuse of webhook endpoints.                                             |
+| Phone Parsing        | All numbers canonicalized using libphonenumber.                                             |
 
 ---
 
-## 12. License
+## 12. Status Polling (Fallback)
 
-MIT License (see `LICENSE.md`).
+Some production networks delay webhooks or they can be transiently disabled. Polling covers that gap.
+
+Enable via `TEXTO_STATUS_POLL_ENABLED=true`. The service provider auto‑schedules `StatusPollJob` each minute. Logic:
+
+-   Select messages in transient states (`queued|sending|sent`) older than `min_age_seconds`.
+-   Skip if attempts exceed caps (`max_attempts`, or `queued_max_attempts` for still‑queued w/out provider id).
+-   Enforce backoff between polls via `last_poll_at` metadata.
+-   Promote forward‑only (e.g., queued -> sent) while avoiding regressions.
+-   Mark terminal on delivered/failed/undelivered. Mark `ambiguous` when provider id missing after exhaustion.
+
+Metadata counters (`poll_attempts`, `last_poll_at`, flags) are merged into `metadata` JSON for auditability.
 
 ---
 
-## 13. Credits
+## 13. Retry & Backoff
 
-Created by [awaisjameel](https://github.com/awaisjameel). Inspired by Spatie's package skeleton.
+`Retry::exponential()` wraps critical provider API calls (send operations). Configured by `retry.max_attempts` & `retry.backoff_start_ms`. Delay doubles each attempt until max attempts reached. Exceptions escalate as `TextoSendFailedException` leading to `MessageFailed` event emission and (optionally) DB record with status `failed`.
 
-## Usage
+---
+
+## 14. Twilio Conversations & Content Templates
+
+When `TWILIO_USE_CONVERSATIONS=true`, Texto:
+
+1. Lazily initializes Conversations sub‑client.
+2. Ensures (or creates) SMS / MMS Content Templates (friendly names configurable).
+3. Creates (or reuses) a Conversation per send (deduplicates participant collisions & reuses existing).
+4. Optionally attaches per‑conversation webhook (config `conversation_webhook_url` or metadata override).
+5. Sends message using template variables (splitting long body into up to 5 × 100‑char chunks). Falls back to body variant if template fails.
+
+Captured metadata includes: `conversation_sid`, `conversation_reused`, optional `conversation_webhook_sid`.
+
+Disable by setting `TWILIO_USE_CONVERSATIONS=false` to revert to classic Messages API.
+
+---
+
+## 15. Extending / Custom Drivers
 
 ```php
-$texto = new Awaisjameel\Texto();
-echo $texto->echoPhrase('Hello, Awaisjameel!');
+use Awaisjameel\Texto\Contracts\DriverManagerInterface;
+use Awaisjameel\Texto\Contracts\MessageSenderInterface;
+use Awaisjameel\Texto\ValueObjects\{PhoneNumber, SentMessageResult};
+use Awaisjameel\Texto\Enums\{Driver, Direction, MessageStatus};
+
+app(DriverManagerInterface::class)->extend('custom', function () {
+    return new class implements MessageSenderInterface {
+        public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult {
+            // ...call provider API...
+            return new SentMessageResult(
+                Driver::Twilio, // or introduce a new driver enum in a fork
+                Direction::Sent,
+                $to,
+                $from,
+                $body,
+                $mediaUrls,
+                $metadata,
+                MessageStatus::Sent,
+                'custom-123'
+            );
+        }
+    };
+});
 ```
 
-## Testing
+Driver requirements:
+
+-   Implement `MessageSenderInterface::send()` returning `SentMessageResult`.
+-   Optionally expose `fetchStatus()` for polling compatibility.
+-   Throw `TextoSendFailedException` for terminal send failures.
+
+---
+
+## 16. Value Objects & Enums
+
+| Type                 | Purpose                                                                                         |
+| -------------------- | ----------------------------------------------------------------------------------------------- |
+| `PhoneNumber`        | Canonical E.164 representation; validation via libphonenumber.                                  |
+| `SentMessageResult`  | Immutable result describing send attempt; Responsable + JSON ready.                             |
+| `MessageStatus` enum | Normalized states (queued, sending, sent, delivered, failed, undelivered, received, ambiguous). |
+| `Driver` enum        | Provider selection.                                                                             |
+| `Direction` enum     | `sent` or `received`.                                                                           |
+
+These construct the domain language and reduce ad‑hoc string comparisons.
+
+---
+
+## 17. Console Commands
+
+| Command                        | Description                                        |
+| ------------------------------ | -------------------------------------------------- |
+| `texto:install`                | Publish config + migration then run migrate.       |
+| `texto:test-send {to} {body?}` | Fire a manual test message (optional `--driver=`). |
+| `texto`                        | Placeholder sample command.                        |
+
+---
+
+## 18. Testing, Fakes & Local Development
+
+-   Uses Pest & Orchestra Testbench for package isolation.
+-   Static analysis via PHPStan (`composer analyse`).
+-   Code style via Pint (`composer format`).
+-   Swap drivers with a fake:
+
+```php
+app(\Awaisjameel\Texto\Contracts\DriverManagerInterface::class)
+    ->extend('twilio', fn () => new \Awaisjameel\Texto\Drivers\FakeSender());
+```
+
+-   Skip webhook signature validation during tests: set `TEXTO_TESTING_SKIP_WEBHOOK_VALIDATION=true`.
+
+Run full suite:
 
 ```bash
 composer test
 ```
 
-## Changelog
+---
 
-Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently.
+## 19. Architecture Overview
 
-## Contributing
+| Layer                                                                           | Responsibility                                                    |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `Texto` facade/root                                                             | Orchestrates send workflow, queue placeholder creation, events.   |
+| `DriverManager`                                                                 | Resolves concrete sender implementation (built‑ins + extensions). |
+| Drivers (`TwilioSender`, `TelnyxSender`)                                        | Provider API invocation + provider‑specific metadata enrichment.  |
+| `StatusMapper`                                                                  | Converts raw provider statuses / events to internal enum.         |
+| `EloquentMessageRepository`                                                     | Persistence & deterministic queued upgrade + polling updates.     |
+| Jobs (`SendMessageJob`, `StatusPollJob`)                                        | Async send & periodic status reconciliation.                      |
+| Webhook Handlers                                                                | Parse & validate inbound/status payloads per provider.            |
+| Support Utilities (`Retry`, `PollingParameterResolver`, `TwilioContentService`) | Cross‑cutting helpers.                                            |
+| Value Objects / Enums                                                           | Strongly typed domain primitives.                                 |
 
-Please see [CONTRIBUTING](CONTRIBUTING.md) for details.
+Design goals: minimal public API surface (`Texto::send`), encapsulated provider variance, explicit lifecycle events, observability via logs + metadata.
 
-## Security Vulnerabilities
+---
 
-Please review [our security policy](../../security/policy) on how to report security vulnerabilities.
+## 20. Troubleshooting & FAQ
 
-## Credits
+**Q: Messages remain in `queued` status.**
+A: Ensure a queue worker is running and `TEXTO_QUEUE=true`. Check logs for send failures; verify credentials. Polling can promote status if enabled.
 
--   [awaisjameel](https://github.com/awaisjameel)
--   [All Contributors](../../contributors)
+**Q: Conversations template creation warnings.**
+A: Not fatal. Texto falls back to body send if template provisioning fails. Check Twilio Content API permissions.
 
-## License
+**Q: Telnyx cost/parts missing.**
+A: They appear only when returned by Telnyx response; ensure API key has proper messaging permissions.
 
-The MIT License (MIT). Please see [License File](LICENSE.md) for more information.
+**Q: Webhook 401 / signature errors.**
+A: Confirm Twilio auth token matches, and the public URL matches Twilio console config exactly (including protocol). For local dev use ngrok & update Twilio config.
+
+**Q: Need another provider (e.g., Vonage).**
+A: Implement a new driver via `extend()` and (optionally) PR the enum + sender.
+
+**Q: What is `ambiguous` status?**
+A: Polling gave up promoting a message lacking a provider id or final result—investigate upstream logs.
+
+**Q: Disable persistence?**
+A: Set `TEXTO_STORE_MESSAGES=false`; events still fire; value objects returned.
+
+---
+
+## 21. Roadmap
+
+-   Multi‑driver weighted routing & failover
+-   Additional providers (MessageBird, Vonage, etc.)
+-   Template/content abstraction for non‑Twilio providers
+-   Bulk send batching helpers
+-   Enhanced Telnyx signature verification
+-   Rate limit / throttling strategies per driver
+
+---
+
+## 22. Contributing
+
+PRs welcome! Please:
+
+1. Open a descriptive issue (optional but helpful).
+2. Run: `composer analyse && composer format && composer test`.
+3. Add tests & update README + CHANGELOG for user‑visible changes.
+4. Keep new public APIs strongly typed.
+
+---
+
+## 23. Security Policy
+
+Report vulnerabilities privately via GitHub Security Advisories. Do not disclose publicly until patched. Avoid sharing live credentials or full raw webhook payloads containing PII in issues.
+
+---
+
+## 24. License & Credits
+
+Released under the MIT License (see `LICENSE.md`).
+Crafted by [awaisjameel](https://github.com/awaisjameel) with inspiration from the Spatie Laravel package skeleton and the broader Laravel OSS ecosystem.
+
+---
+
+### At a Glance Cheat‑Sheet
+
+```php
+// Basic
+Texto::send('+15551234567', 'Ping');
+
+// With media
+Texto::send('+15551234567', 'Photo', ['media_urls' => ['https://example.com/pic.jpg']]);
+
+// Per‑message driver override
+Texto::send('+15551234567', 'Hi via Telnyx', ['driver' => 'telnyx']);
+
+// Custom from + metadata
+Texto::send('+15551234567', 'Promo', [
+    'from' => '+15550009999',
+    'metadata' => ['campaign' => 'spring']
+]);
+```
+
+---
+
+Enjoy building with Texto. Star the repo if it saves you time! ⭐
