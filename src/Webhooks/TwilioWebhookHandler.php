@@ -18,7 +18,7 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
 
     public function __construct(array $config = [])
     {
-        $this->config = empty($config) ? (config('texto.twilio') ?? []) : $config;
+        $this->config = $config ?: config('texto.twilio', []);
     }
 
     public function handle(Request $request): WebhookProcessingResult
@@ -53,10 +53,18 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
                 throw new TextoWebhookValidationException('Unsupported Twilio conversation event type.');
             }
             $authorRaw = $request->input('Author');
-            $author = PhoneNumber::fromString($authorRaw);
+            $author = $this->parsePhoneOrFail($authorRaw, 'author');
             $fromNumberConfigured = $this->config['from_number'] ?? null;
             // Infer "to" as our configured from number (the business/system number)
-            $to = $fromNumberConfigured ? PhoneNumber::fromString($fromNumberConfigured) : PhoneNumber::fromString($authorRaw); // fallback
+            if ($fromNumberConfigured) {
+                try {
+                    $to = PhoneNumber::fromString($fromNumberConfigured);
+                } catch (\Throwable $e) {
+                    throw new TextoWebhookValidationException('Invalid configured Twilio from number: '.$e->getMessage(), 0, $e);
+                }
+            } else {
+                $to = $this->parsePhoneOrFail($authorRaw, 'author');
+            }
             $body = $request->input('Body');
             $providerId = $request->input('MessageSid');
             $media = [];
@@ -76,8 +84,8 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
         }
 
         // Classic Messaging webhook path
-        $from = PhoneNumber::fromString($request->input('From'));
-        $to = PhoneNumber::fromString($request->input('To'));
+        $from = $this->parsePhoneOrFail($request->input('From'), 'from');
+        $to = $this->parsePhoneOrFail($request->input('To'), 'to');
         $body = $request->input('Body');
         $media = [];
         $mediaCount = (int) $request->input('NumMedia', 0);
@@ -90,5 +98,17 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
         $providerId = $request->input('MessageSid');
 
         return WebhookProcessingResult::inbound(Driver::Twilio, $from, $to, $body, $media, [], $providerId);
+    }
+
+    protected function parsePhoneOrFail(?string $raw, string $field): PhoneNumber
+    {
+        if (! $raw) {
+            throw new TextoWebhookValidationException("Twilio payload missing {$field} phone number.");
+        }
+        try {
+            return PhoneNumber::fromString($raw);
+        } catch (\Throwable $e) {
+            throw new TextoWebhookValidationException("Invalid {$field} phone number supplied: ".$e->getMessage(), 0, $e);
+        }
     }
 }

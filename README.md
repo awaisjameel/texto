@@ -9,7 +9,7 @@ Batteries included: queueing, retries, events, webhooks, polling, typed value ob
 [![Downloads](https://img.shields.io/packagist/dt/awaisjameel/texto.svg?style=flat-square)](https://packagist.org/packages/awaisjameel/texto)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE.md)
 
-Texto provides a unified, extensible Laravel package for carrier-grade SMS/MMS messaging. Built for Laravel 10–12 (PHP 7.4 / 8.2+), it abstracts provider complexities (Twilio, Telnyx) through consistent contracts and value objects, enabling seamless integration with enterprise messaging workflows.
+Texto provides a unified, extensible Laravel package for carrier-grade SMS/MMS messaging. Built for Laravel 10–12 (PHP 7.4 / 8.1+), it abstracts provider complexities (Twilio, Telnyx) through consistent contracts and value objects, enabling seamless integration with enterprise messaging workflows.
 
 **Key Features:**
 
@@ -140,6 +140,7 @@ Before installing Texto, ensure your Laravel application meets these requirement
 -   **PHP**: 7.4 or higher (8.2+ recommended)
 -   **Database**: MySQL, PostgreSQL, SQLite, or SQL Server
 -   **Queue System**: Any Laravel-supported queue driver (Database recommended for production)
+-   **PHP Extensions**: `ext-sodium` for Telnyx signature verification
 
 ### Quick Installation
 
@@ -234,6 +235,7 @@ TWILIO_CONVERSATION_WEBHOOK_URL=    # optional override
 TELNYX_API_KEY=...
 TELNYX_MESSAGING_PROFILE_ID=...
 TELNYX_FROM_NUMBER=+15550002222
+TELNYX_WEBHOOK_SECRET=base64-encoded-public-key
 ```
 
 ---
@@ -321,10 +323,11 @@ Twilio-specific settings for both classic and Conversations API modes.
     'api_key' => env('TELNYX_API_KEY'),
     'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
     'from_number' => env('TELNYX_FROM_NUMBER'),
+    'webhook_secret' => env('TELNYX_WEBHOOK_SECRET'),
 ],
 ```
 
-Telnyx API credentials and messaging profile configuration.
+Telnyx API credentials, messaging profile configuration, and the base64-encoded public key used to verify webhook signatures.
 
 ### Testing Configuration
 
@@ -1368,7 +1371,6 @@ We welcome contributions! Areas of particular interest:
 | Texto Version | Laravel Version | PHP Version | Status  |
 | ------------- | --------------- | ----------- | ------- |
 | 1.x           | 10.0 - 12.x     | 7.4 - 8.2   | Active  |
-| 2.x           | 11.0 - 13.x     | 8.1 - 8.3   | Planned |
 
 ### Migration Guide
 

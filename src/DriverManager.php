@@ -30,6 +30,7 @@ class DriverManager implements DriverManagerInterface
         return match ($driver) {
             Driver::Twilio => new TwilioSender($this->config['twilio'] ?? []),
             Driver::Telnyx => new TelnyxSender($this->config['telnyx'] ?? []),
+            default => throw new \InvalidArgumentException("Unsupported driver: {$name}"),
         };
     }
 

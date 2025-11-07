@@ -32,11 +32,12 @@ final class StatusMapper
 
         return match (strtolower($status)) {
             'queued' => MessageStatus::Queued,
-            'sending' => MessageStatus::Sending,
-            'sent' => MessageStatus::Sent,
-            'delivered' => MessageStatus::Delivered,
-            'failed' => MessageStatus::Failed,
+            'accepted', 'sending', 'receiving' => MessageStatus::Sending,
+            'sent', 'submitted', 'delivery_unknown' => MessageStatus::Sent,
+            'delivered', 'read' => MessageStatus::Delivered,
+            'failed', 'delivery_failed' => MessageStatus::Failed,
             'undelivered' => MessageStatus::Undelivered,
+            'received' => MessageStatus::Received,
             default => MessageStatus::Sent,
         };
     }
@@ -48,11 +49,12 @@ final class StatusMapper
             $et = strtolower($eventType);
 
             return match ($et) {
-                'message.queued' => MessageStatus::Queued,
-                'message.sending' => MessageStatus::Sending,
-                'message.sent' => MessageStatus::Sent,
-                'message.delivered' => MessageStatus::Delivered,
-                'message.failed', 'message.canceled' => MessageStatus::Failed,
+                'message.queued', 'message.delivery_status.queued' => MessageStatus::Queued,
+                'message.sending', 'message.delivery_status.sending' => MessageStatus::Sending,
+                'message.sent', 'message.delivery_status.sent' => MessageStatus::Sent,
+                'message.delivered', 'message.delivery_status.delivered', 'message.delivery_status.read' => MessageStatus::Delivered,
+                'message.failed', 'message.canceled', 'message.delivery_status.failed', 'message.delivery_status.undelivered' => MessageStatus::Failed,
+                'message.received' => MessageStatus::Received,
                 default => MessageStatus::Sent,
             };
         }
@@ -60,8 +62,10 @@ final class StatusMapper
             return match (strtolower($rawStatus)) {
                 'queued' => MessageStatus::Queued,
                 'sending' => MessageStatus::Sending,
+                'accepted' => MessageStatus::Sending,
                 'sent' => MessageStatus::Sent,
                 'delivered' => MessageStatus::Delivered,
+                'read' => MessageStatus::Delivered,
                 'failed' => MessageStatus::Failed,
                 'undelivered' => MessageStatus::Undelivered,
                 default => MessageStatus::Sent,

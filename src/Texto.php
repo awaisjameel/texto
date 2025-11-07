@@ -29,9 +29,11 @@ class Texto
     /**
      * Send an SMS/MMS message using the active (or overridden) driver.
      *
-     * @param  string  $to  E.164 formatted recipient number
-     * @param  string  $body  Message body
-     * @param  array{media_urls?:string[], metadata?:array, from?:string, driver?:string}  $options
+     * @param  string  $to  Recipient phone number (E.164 format or local format)
+     * @param  string  $body  Message body text
+     * @param  array{media_urls?:string[], metadata?:array, from?:string, driver?:string, queued_job?:bool, queued_message_id?:int}  $options
+     *
+     * @throws TextoSendFailedException
      */
     public function send(string $to, string $body, array $options = []): SentMessageResult
     {
@@ -45,17 +47,18 @@ class Texto
         // Resolve effective default 'from' (so queued row uses same as final send) if still null
         if (! $fromNumber) {
             $activeDriver = $driverName ?: config('texto.driver', 'twilio');
-            $rawFrom = null;
-            if ($activeDriver === Driver::Twilio->value) {
-                $rawFrom = config('texto.twilio.from_number');
-            } elseif ($activeDriver === Driver::Telnyx->value) {
-                $rawFrom = config('texto.telnyx.from_number');
-            }
+            $driverConfig = config("texto.{$activeDriver}", []);
+            $rawFrom = $driverConfig['from_number'] ?? null;
+
             if ($rawFrom) {
                 try {
                     $fromNumber = PhoneNumber::fromString($rawFrom);
                 } catch (\Throwable $e) {
-                    Log::warning('Texto default from number invalid', ['from' => $rawFrom, 'error' => $e->getMessage()]);
+                    Log::warning('Texto default from number invalid', [
+                        'from' => $rawFrom,
+                        'driver' => $activeDriver,
+                        'error' => $e->getMessage(),
+                    ]);
                 }
             }
         }
@@ -64,8 +67,9 @@ class Texto
 
         // Queue mode: create queued result, persist, dispatch job (only on initial call, not inside queued job)
         if (config('texto.queue', false) && empty($options['queued_job'])) {
+            $currentDriver = $driverName ?: config('texto.driver', 'twilio');
             $queuedResult = new SentMessageResult(
-                $driverName ? Driver::from($driverName) : Driver::from(config('texto.driver', 'twilio')),
+                Driver::from($currentDriver),
                 \Awaisjameel\Texto\Enums\Direction::Sent,
                 $toNumber,
                 $fromNumber,
@@ -84,7 +88,7 @@ class Texto
                 'from' => $fromNumber?->e164,
                 'media_urls' => $media,
                 'metadata' => $metadata,
-                'driver' => $driverName,
+                'driver' => $currentDriver,
             ]));
 
             return $queuedResult;
@@ -94,9 +98,15 @@ class Texto
             /** @var MessageSenderInterface $sender */
             $result = $sender->send($toNumber, $body, $fromNumber, $media, $metadata);
         } catch (TextoSendFailedException $e) {
-            Log::error('Texto send failed: '.$e->getMessage(), ['driver' => $driverName]);
+            Log::error('Texto send failed', [
+                'driver' => $driverName ?: config('texto.driver', 'twilio'),
+                'to' => $toNumber->e164,
+                'from' => $fromNumber?->e164,
+                'error' => $e->getMessage(),
+            ]);
+            $currentDriver = $driverName ?: config('texto.driver', 'twilio');
             $failed = new SentMessageResult(
-                $driverName ? Driver::from($driverName) : Driver::from(config('texto.driver', 'twilio')),
+                Driver::from($currentDriver),
                 \Awaisjameel\Texto\Enums\Direction::Sent,
                 $toNumber,
                 $fromNumber,
@@ -122,10 +132,18 @@ class Texto
                     $upgraded = $this->messages->upgradeQueued((int) $queuedMessageId, $result);
                     if (! $upgraded) {
                         // If deterministic upgrade fails (row missing or already terminal) create new record for audit trail.
+                        Log::debug('Texto queued message upgrade failed, creating new record', [
+                            'queued_message_id' => $queuedMessageId,
+                            'provider_id' => $result->providerMessageId,
+                        ]);
                         $this->messages->storeSent($result);
                     }
                 } else {
                     // Without ID, just create a fresh record (deterministic path unavailable)
+                    Log::debug('Texto queued message upgrade unavailable, creating new record', [
+                        'has_queued_message_id' => $queuedMessageId !== null,
+                        'provider_id' => $result->providerMessageId,
+                    ]);
                     $this->messages->storeSent($result);
                 }
             } else {

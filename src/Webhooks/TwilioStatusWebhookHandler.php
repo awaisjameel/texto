@@ -18,7 +18,7 @@ class TwilioStatusWebhookHandler implements WebhookHandlerInterface
 
     public function __construct(array $config = [])
     {
-        $this->config = empty($config) ? (config('texto.twilio') ?? []) : $config;
+        $this->config = $config ?: config('texto.twilio', []);
     }
 
     public function handle(Request $request): WebhookProcessingResult
