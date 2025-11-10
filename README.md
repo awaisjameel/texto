@@ -236,6 +236,7 @@ TELNYX_API_KEY=...
 TELNYX_MESSAGING_PROFILE_ID=...
 TELNYX_FROM_NUMBER=+15550002222
 TELNYX_WEBHOOK_SECRET=base64-encoded-public-key
+TELNYX_HTTP_TIMEOUT=15              # seconds for outbound API calls
 ```
 
 ---
@@ -324,10 +325,11 @@ Twilio-specific settings for both classic and Conversations API modes.
     'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
     'from_number' => env('TELNYX_FROM_NUMBER'),
     'webhook_secret' => env('TELNYX_WEBHOOK_SECRET'),
+    'timeout' => env('TELNYX_HTTP_TIMEOUT', 15),
 ],
 ```
 
-Telnyx API credentials, messaging profile configuration, and the base64-encoded public key used to verify webhook signatures.
+Telnyx API credentials, messaging profile configuration, the base64-encoded public key used to verify webhook signatures, and a transport timeout (seconds) for outbound REST calls.
 
 ### Testing Configuration
 
@@ -1687,7 +1689,7 @@ Support Texto's development:
 
 -   [Laravel Notification Channels](https://github.com/laravel-notification-channels) - Alternative notification approach
 -   [Twilio PHP SDK](https://github.com/twilio/twilio-php) - Official Twilio library
--   [Telnyx PHP SDK](https://github.com/telnyx/telnyx-php) - Official Telnyx library
+-   [Telnyx Messaging API Reference](https://developers.telnyx.com/docs/api/v2/messaging/Messages) - REST endpoints used by Texto's Telnyx driver
 
 ---
 
