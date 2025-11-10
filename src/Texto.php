@@ -172,7 +172,6 @@ class Texto
     /**
      * @template T
      *
-     * @param  string|null  $driverName
      * @param  array<string, mixed>|null  $override
      * @param  Closure():T  $callback
      * @return T
