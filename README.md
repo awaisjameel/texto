@@ -236,6 +236,7 @@ TELNYX_API_KEY=...
 TELNYX_MESSAGING_PROFILE_ID=...
 TELNYX_FROM_NUMBER=+15550002222
 TELNYX_WEBHOOK_SECRET=base64-encoded-public-key
+TELNYX_HTTP_TIMEOUT=15              # seconds for outbound API calls
 ```
 
 ---
@@ -324,10 +325,11 @@ Twilio-specific settings for both classic and Conversations API modes.
     'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
     'from_number' => env('TELNYX_FROM_NUMBER'),
     'webhook_secret' => env('TELNYX_WEBHOOK_SECRET'),
+    'timeout' => env('TELNYX_HTTP_TIMEOUT', 15),
 ],
 ```
 
-Telnyx API credentials, messaging profile configuration, and the base64-encoded public key used to verify webhook signatures.
+Telnyx API credentials, messaging profile configuration, the base64-encoded public key used to verify webhook signatures, and a transport timeout (seconds) for outbound REST calls.
 
 ### Testing Configuration
 
@@ -509,6 +511,8 @@ foreach ($phones as $phone) {
 
 Benefits: immediate API responses, backpressure via Laravel queue, deterministic DB state.
 
+> **Note:** The queued job now includes a snapshot of the active driver configuration (API keys, profile IDs, etc.) so workers and scheduled pollers have the same credentials that were present when the message was enqueued. Ensure your queue transport (e.g., database table, Redis) is appropriately protected since provider secrets travel with the job payload.
+
 ---
 
 ## 8. Events & Observability
@@ -677,6 +681,9 @@ Send an SMS or MMS message.
 -   `from` (string): Override sender number
 -   `driver` (string): Override provider ('twilio' or 'telnyx')
 -   `metadata` (array): Custom metadata to store with message
+-   `driver_config` (array): Optional provider configuration snapshot (API keys, messaging profile IDs, etc.) that temporarily overrides `config('texto.{driver}')` for this send; primarily used by queued jobs or multi-tenant flows.
+
+> Note: When supplying `driver_config`, remember that any secrets included will travel with the queued job payload and logs you emit. Use encrypted queues or other safeguards appropriate for your environment.
 
 **Returns:** `SentMessageResult` object
 
@@ -1687,7 +1694,7 @@ Support Texto's development:
 
 -   [Laravel Notification Channels](https://github.com/laravel-notification-channels) - Alternative notification approach
 -   [Twilio PHP SDK](https://github.com/twilio/twilio-php) - Official Twilio library
--   [Telnyx PHP SDK](https://github.com/telnyx/telnyx-php) - Official Telnyx library
+-   [Telnyx Messaging API Reference](https://developers.telnyx.com/docs/api/v2/messaging/Messages) - REST endpoints used by Texto's Telnyx driver
 
 ---
 

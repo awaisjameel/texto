@@ -39,7 +39,7 @@ class TextoServiceProvider extends PackageServiceProvider
     {
         // Bind the driver manager singleton
         $this->app->singleton(DriverManagerInterface::class, function ($app) {
-            return new DriverManager(config('texto'));
+            return new DriverManager($app['config']);
         });
 
         // Message repository binding

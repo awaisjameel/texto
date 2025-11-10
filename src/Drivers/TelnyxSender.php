@@ -11,22 +11,22 @@ use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Support\Retry;
 use Awaisjameel\Texto\Support\StatusMapper;
+use Awaisjameel\Texto\Support\TelnyxApiClient;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Illuminate\Support\Facades\Log;
-use Telnyx\Client as TelnyxClient;
 
 class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInterface
 {
-    protected TelnyxClient $telnyxClient;
+    protected TelnyxApiClient $apiClient;
 
-    public function __construct(protected array $config)
+    public function __construct(protected array $config, ?TelnyxApiClient $apiClient = null)
     {
         $apiKey = $this->config['api_key'] ?? null;
         if (! $apiKey) {
             throw new TextoSendFailedException('Telnyx API key missing.');
         }
-        $this->telnyxClient = new TelnyxClient($apiKey);
+        $this->apiClient = $apiClient ?? new TelnyxApiClient($apiKey);
     }
 
     /**
@@ -41,32 +41,29 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
         }
 
         $webhookUrl = $metadata['webhook_url'] ?? null;
+        $payload = [
+            'to' => $to->e164,
+            'from' => $fromNumber,
+            'text' => $body,
+            'messaging_profile_id' => $profileId,
+        ];
+        if (! empty($mediaUrls)) {
+            $payload['media_urls'] = $mediaUrls;
+        }
+        if ($webhookUrl) {
+            $payload['webhook_url'] = $webhookUrl;
+        }
 
         try {
-            $response = Retry::exponential(function () use ($fromNumber, $to, $body, $profileId, $mediaUrls, $webhookUrl) {
-                return $this->telnyxClient->messages->send(
-                    to: $to->e164,
-                    from: $fromNumber,
-                    text: $body,
-                    mediaURLs: $mediaUrls,
-                    webhookURL: $webhookUrl,
-                    messagingProfileID: $profileId
-                );
+            $response = Retry::exponential(function () use ($payload) {
+                return $this->apiClient->sendMessage($payload);
             }, (int) config('texto.retry.max_attempts', 3), (int) config('texto.retry.backoff_start_ms', 200));
-
         } catch (\Throwable $e) {
             Log::error('Texto Telnyx send failed', ['error' => $e->getMessage()]);
             throw new TextoSendFailedException('Telnyx send failed: '.$e->getMessage());
         }
 
-        // Telnyx SDK response shape: top-level object exposing ->data (stdClass) which holds id, to[], cost, etc.
-        $data = null;
-        if (is_object($response) && isset($response->data)) {
-            $data = $response->data; // stdClass
-        } elseif (is_array($response) && isset($response['data'])) {
-            $data = (object) $response['data'];
-        }
-
+        $data = $this->extractData($response['data'] ?? null);
         $providerId = null;
         $telnyxStatusRaw = null;
         $parts = null;
@@ -74,15 +71,13 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
         $costCurrency = null;
 
         if ($data) {
-            $providerId = $data->id ?? null;
-            // 'to' is an array of recipient objects; take first for status
-            if (isset($data->to) && is_array($data->to) && isset($data->to[0]->status)) {
-                $telnyxStatusRaw = $data->to[0]->status;
-            }
-            $parts = $data->parts ?? null;
-            if (isset($data->cost) && isset($data->cost->amount)) {
-                $costAmount = $data->cost->amount;
-                $costCurrency = $data->cost->currency ?? 'USD';
+            $providerId = $data['id'] ?? null;
+            $telnyxStatusRaw = $this->extractRecipientStatus($data['to'] ?? null);
+            $parts = $data['parts'] ?? null;
+            $cost = $this->extractData($data['cost'] ?? null);
+            if ($cost) {
+                $costAmount = $cost['amount'] ?? null;
+                $costCurrency = $cost['currency'] ?? 'USD';
             }
         }
 
@@ -123,34 +118,61 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
     public function fetchStatus(string $providerMessageId, mixed ...$context): ?\Awaisjameel\Texto\Enums\MessageStatus
     {
         try {
-            $resp = $this->telnyxClient->messages->retrieve($providerMessageId);
+            $resp = $this->apiClient->retrieveMessage($providerMessageId);
         } catch (\Throwable $e) {
             Log::warning('Telnyx fetchStatus failed', ['id' => $providerMessageId, 'error' => $e->getMessage()]);
 
             return null;
         }
 
-        // Log::info('Texto Telnyx fetchStatus response received', ['id' => $providerMessageId, 'response' => $resp]);
-
-        $data = null;
-        if (is_object($resp) && isset($resp->data)) {
-            $data = $resp->data;
-        } elseif (is_array($resp) && isset($resp['data'])) {
-            $data = (object) $resp['data'];
-        }
+        $data = $this->extractData($resp['data'] ?? null);
         if (! $data) {
             return null;
         }
-        $raw = null;
-        if (isset($data->to) && is_array($data->to) && isset($data->to[0]->status)) {
-            $raw = $data->to[0]->status;
-        }
+        $raw = $this->extractRecipientStatus($data['to'] ?? null);
         if (! $raw) {
             return null;
         }
 
-        // Log::info('Texto Telnyx fetchStatus parsed', ['id' => $providerMessageId, 'raw_status' => $raw]);
-
         return StatusMapper::map(Driver::Telnyx, $raw, null);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function extractData(mixed $value): ?array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+        if (is_object($value)) {
+            return (array) $value;
+        }
+
+        return null;
+    }
+
+    private function extractRecipientStatus(mixed $recipients): ?string
+    {
+        $entries = $this->extractData($recipients);
+        if (! $entries) {
+            return null;
+        }
+
+        if (isset($entries['status']) && is_string($entries['status'])) {
+            return $entries['status'];
+        }
+
+        $first = $entries[0] ?? null;
+        if ($first === null) {
+            return null;
+        }
+
+        $firstData = $this->extractData($first);
+        if ($firstData && isset($firstData['status']) && is_string($firstData['status'])) {
+            return $firstData['status'];
+        }
+
+        return null;
     }
 }
