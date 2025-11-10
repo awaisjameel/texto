@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Awaisjameel\Texto;
 
 use Awaisjameel\Texto\Commands\TextoCommand;
@@ -53,7 +55,7 @@ class TextoServiceProvider extends PackageServiceProvider
             return $manager->sender();
         });
 
-        // Facade root
+        // Facade root - inject dependencies
         $this->app->singleton(Texto::class, function ($app) {
             return new Texto(
                 $app->make(DriverManagerInterface::class),

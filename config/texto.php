@@ -31,6 +31,7 @@ return [
         'api_key' => env('TELNYX_API_KEY'),
         'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
         'from_number' => env('TELNYX_FROM_NUMBER'),
+        'webhook_secret' => env('TELNYX_WEBHOOK_SECRET'),
     ],
     'webhook' => [
         'secret' => env('TEXTO_WEBHOOK_SECRET'),

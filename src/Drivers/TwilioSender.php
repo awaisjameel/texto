@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Awaisjameel\Texto\Drivers;
 
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
+use Awaisjameel\Texto\Contracts\PollableMessageSenderInterface;
 use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
@@ -18,7 +19,7 @@ use Illuminate\Support\Facades\Log;
 use Twilio\Exceptions\RestException as TwilioRestException;
 use Twilio\Rest\Client as TwilioClient;
 
-class TwilioSender implements MessageSenderInterface
+class TwilioSender implements MessageSenderInterface, PollableMessageSenderInterface
 {
     protected TwilioClient $client;
 
@@ -39,9 +40,17 @@ class TwilioSender implements MessageSenderInterface
     }
 
     /**
-     * Public send entry. If conversations disabled fall back to classic Messages API.
+     * Send an SMS/MMS message via Twilio.
      *
-     * @param  string[]  $mediaUrls
+     * Supports both Conversations API (with templates) and classic Messages API.
+     *
+     * @param  PhoneNumber  $to  Recipient phone number
+     * @param  string  $body  Message body text
+     * @param  PhoneNumber|null  $from  Sender phone number
+     * @param  string[]  $mediaUrls  Array of media URLs for MMS
+     * @param  array<string, mixed>  $metadata  Additional metadata
+     *
+     * @throws TextoSendFailedException
      */
     public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
     {
@@ -51,9 +60,13 @@ class TwilioSender implements MessageSenderInterface
             throw new TextoSendFailedException('Twilio from number not configured.');
         }
 
-        $useConversations = ($this->config['use_conversations'] ?? true) === true && $this->conversationsClient !== null;
+        $useConversations = ($this->config['use_conversations'] ?? true) === true;
 
         if ($useConversations) {
+            if ($this->conversationsClient === null) {
+                $this->conversationsClient = $this->client->conversations->v1;
+            }
+
             return $this->sendViaConversations($to, $body, $fromNumber, $mediaUrls, $metadata);
         }
         // Legacy direct message path
@@ -89,17 +102,23 @@ class TwilioSender implements MessageSenderInterface
     }
 
     /**
-     * Conversations + Content Templates send implementation.
+     * Send message via Twilio Conversations API with content templates.
      *
-     * @param  string[]  $mediaUrls
+     * @param  PhoneNumber  $to  Recipient phone number
+     * @param  string  $body  Message body text
+     * @param  string  $fromNumber  Sender phone number (E.164)
+     * @param  string[]  $mediaUrls  Array of media URLs for MMS
+     * @param  array<string, mixed>  $metadata  Additional metadata
+     *
+     * @throws TextoSendFailedException
      */
     protected function sendViaConversations(PhoneNumber $to, string $body, string $fromNumber, array $mediaUrls, array $metadata): SentMessageResult
     {
 
-        if (($config['use_conversations'] ?? true) === true) {
+        if ($this->conversationsClient === null) {
             $this->conversationsClient = $this->client->conversations->v1;
-            $this->InitializeTemplates();
         }
+        $this->initializeTemplates();
 
         // 1. Create a conversation (ephemeral per send initially)
         $prefix = $this->config['conversation_prefix'] ?? 'Texto';
@@ -222,7 +241,7 @@ class TwilioSender implements MessageSenderInterface
     }
 
     /** Initialize (or reuse configured) template SIDs */
-    protected function InitializeTemplates(): void
+    protected function initializeTemplates(): void
     {
         $this->smsTemplateSid = $this->config['sms_template_sid'] ?? null;
         $this->mmsTemplateSid = $this->config['mms_template_sid'] ?? null;
@@ -295,7 +314,13 @@ class TwilioSender implements MessageSenderInterface
         ];
     }
 
-    /** Split body into up to 5 x 100-char segments + optional media path variable */
+    /**
+     * Split message body into template variables (up to 5 segments of 100 chars each).
+     *
+     * @param  string  $body  Message body text
+     * @param  string|null  $mediaUrl  Optional media URL for MMS templates
+     * @return array<string, string> Template variables array
+     */
     protected function prepareContentVariables(string $body, ?string $mediaUrl = null): array
     {
         $parts = str_split($body, 100);
@@ -334,8 +359,13 @@ class TwilioSender implements MessageSenderInterface
     }
 
     /**
-     * Attempt to parse a Twilio Conversation SID (CH...) out of a duplicate participant error message.
-     * Twilio sometimes includes the existing Conversation SID in the error string.
+     * Attempt to parse a Twilio Conversation SID (CH...) from a duplicate participant error.
+     *
+     * Twilio sometimes includes the existing Conversation SID in the error message
+     * when attempting to add a participant that already exists.
+     *
+     * @param  string  $errorMessage  The error message from Twilio API
+     * @return string|null The parsed conversation SID or null if not found
      */
     protected function parseConversationSidFromError(string $errorMessage): ?string
     {
@@ -347,7 +377,13 @@ class TwilioSender implements MessageSenderInterface
     }
 
     /**
-     * Attaches (replaces) a webhook for events we care about. Returns webhook SID or null.
+     * Attach or replace webhook configuration for a conversation.
+     *
+     * Removes existing webhooks and creates a new one for message events.
+     *
+     * @param  string  $conversationSid  The conversation SID
+     * @param  string  $webhookUrl  The webhook URL to attach
+     * @return string|null The webhook SID or null on failure
      */
     protected function attachConversationWebhook(string $conversationSid, string $webhookUrl): ?string
     {
@@ -388,15 +424,22 @@ class TwilioSender implements MessageSenderInterface
     }
 
     /**
-     * Fetch latest status for a Twilio message.
-     * When the message was sent inside a Conversation we must use the Conversations API
-     * because the classic Messages API lookup may not return the message SID.
+     * Fetch the latest status for a Twilio message.
      *
-     * @param  string  $providerMessageId  The Twilio Message SID (for legacy or conversation message).
-     * @param  string|null  $conversationSid  Optional Conversation SID if the message was sent via Conversations.
+     * When messages are sent via Conversations API, we must use the Conversations API
+     * for status lookup since the classic Messages API may not return the message SID.
+     *
+     * @param  string  $providerMessageId  The Twilio Message SID
+     * @param  string|null  $conversationSid  Optional Conversation SID for conversation messages
+     * @return MessageStatus|null The current message status or null if not found
      */
-    public function fetchStatus(string $providerMessageId, ?string $conversationSid = null): ?MessageStatus
+    public function fetchStatus(string $providerMessageId, mixed ...$context): ?MessageStatus
     {
+        $conversationSid = null;
+        if (! empty($context)) {
+            $candidate = $context[0] ?? null;
+            $conversationSid = is_string($candidate) ? $candidate : null;
+        }
         $useConversations = ($this->config['use_conversations'] ?? true) === true;
 
         // Attempt conversation fetch first if we have a conversation SID.

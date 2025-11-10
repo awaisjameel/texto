@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Awaisjameel\Texto\Drivers;
 
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
+use Awaisjameel\Texto\Contracts\PollableMessageSenderInterface;
 use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
@@ -15,7 +16,7 @@ use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Illuminate\Support\Facades\Log;
 use Telnyx\Client as TelnyxClient;
 
-class TelnyxSender implements MessageSenderInterface
+class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInterface
 {
     protected TelnyxClient $telnyxClient;
 
@@ -119,7 +120,7 @@ class TelnyxSender implements MessageSenderInterface
     /**
      * Poll latest status for a Telnyx message.
      */
-    public function fetchStatus(string $providerMessageId): ?\Awaisjameel\Texto\Enums\MessageStatus
+    public function fetchStatus(string $providerMessageId, mixed ...$context): ?\Awaisjameel\Texto\Enums\MessageStatus
     {
         try {
             $resp = $this->telnyxClient->messages->retrieve($providerMessageId);

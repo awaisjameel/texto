@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
+use Awaisjameel\Texto\Contracts\PollableMessageSenderInterface;
 use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
@@ -25,14 +26,14 @@ it('promotes queued to sent on polling when provider returns sent', function () 
         {
             public function sender(?Driver $driver = null): MessageSenderInterface
             {
-                return new class implements MessageSenderInterface
+                return new class implements MessageSenderInterface, PollableMessageSenderInterface
                 {
                     public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
                     {
                         throw new RuntimeException('send not used in polling test');
                     }
 
-                    public function fetchStatus(string $providerMessageId): ?MessageStatus
+                    public function fetchStatus(string $providerMessageId, mixed ...$context): ?MessageStatus
                     {
                         return MessageStatus::Sent; // Always promote to Sent
                     }

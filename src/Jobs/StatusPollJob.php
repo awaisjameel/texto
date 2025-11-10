@@ -6,6 +6,7 @@ namespace Awaisjameel\Texto\Jobs;
 
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
+use Awaisjameel\Texto\Contracts\PollableMessageSenderInterface;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Models\Message;
@@ -41,13 +42,29 @@ class StatusPollJob implements ShouldQueue
             MessageStatus::Sent->value,
         ];
 
+        // First pass: poll messages without provider IDs (queued/sending states)
         $query = Message::query()
             ->whereIn('status', $transientStatuses)
             ->where('created_at', '<=', now()->subSeconds($minAge))
+            ->whereNull('provider_message_id')
             ->orderBy('id', 'asc')
             ->limit($batch);
 
         $candidates = $query->get();
+
+        // Second pass: poll messages with provider IDs if we have capacity
+        if ($candidates->count() < $batch) {
+            $remainingCapacity = $batch - $candidates->count();
+            $secondQuery = Message::query()
+                ->whereIn('status', $transientStatuses)
+                ->where('created_at', '<=', now()->subSeconds($minAge))
+                ->whereNotNull('provider_message_id')
+                ->orderBy('id', 'asc')
+                ->limit($remainingCapacity);
+
+            $candidates = $candidates->merge($secondQuery->get());
+        }
+
         if ($candidates->isEmpty()) {
             return;
         }
@@ -82,7 +99,7 @@ class StatusPollJob implements ShouldQueue
                 continue;
             }
             $sender = $drivers->sender($driverEnum);
-            if (! method_exists($sender, 'fetchStatus')) {
+            if (! $sender instanceof PollableMessageSenderInterface) {
                 continue; // driver does not support polling
             }
 
@@ -143,8 +160,12 @@ class StatusPollJob implements ShouldQueue
                     // Should not happen given earlier provider id guard; continue defensively.
                     continue;
                 }
+                $providerArgument = array_shift($args);
+                if (! is_string($providerArgument)) {
+                    continue;
+                }
                 /** @var MessageStatus|null $fetched */
-                $fetched = $sender->{'fetchStatus'}(...$args);
+                $fetched = $sender->fetchStatus($providerArgument, ...$args);
                 $newStatus = $fetched;
             } catch (\Throwable $e) {
                 Log::warning('Status poll fetch failed', [
