@@ -58,7 +58,7 @@ class TelnyxApiClient
 
         $json = $response->json();
         if (! is_array($json)) {
-            throw RequestException::create($response);
+            throw new RequestException($response);
         }
 
         return $json;
