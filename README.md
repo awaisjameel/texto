@@ -511,6 +511,8 @@ foreach ($phones as $phone) {
 
 Benefits: immediate API responses, backpressure via Laravel queue, deterministic DB state.
 
+> **Note:** The queued job now includes a snapshot of the active driver configuration (API keys, profile IDs, etc.) so workers and scheduled pollers have the same credentials that were present when the message was enqueued. Ensure your queue transport (e.g., database table, Redis) is appropriately protected since provider secrets travel with the job payload.
+
 ---
 
 ## 8. Events & Observability
@@ -679,6 +681,9 @@ Send an SMS or MMS message.
 -   `from` (string): Override sender number
 -   `driver` (string): Override provider ('twilio' or 'telnyx')
 -   `metadata` (array): Custom metadata to store with message
+-   `driver_config` (array): Optional provider configuration snapshot (API keys, messaging profile IDs, etc.) that temporarily overrides `config('texto.{driver}')` for this send; primarily used by queued jobs or multi-tenant flows.
+
+> Note: When supplying `driver_config`, remember that any secrets included will travel with the queued job payload and logs you emit. Use encrypted queues or other safeguards appropriate for your environment.
 
 **Returns:** `SentMessageResult` object
 

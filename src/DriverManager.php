@@ -10,26 +10,29 @@ use Awaisjameel\Texto\Drivers\TelnyxSender;
 use Awaisjameel\Texto\Drivers\TwilioSender;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Exceptions\TextoException;
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 
 class DriverManager implements DriverManagerInterface
 {
     /** @var array<string, callable():MessageSenderInterface> */
     protected array $extensions = [];
 
-    public function __construct(protected array $config) {}
+    public function __construct(protected ConfigRepository $config) {}
 
     public function sender(?Driver $driver = null): MessageSenderInterface
     {
-        $driver = $driver ?? Driver::from($this->config['driver'] ?? 'twilio');
+        $driver = $driver ?? Driver::from((string) $this->config->get('texto.driver', 'twilio'));
         $name = $driver->value;
 
         if (isset($this->extensions[$name])) {
             return ($this->extensions[$name])();
         }
 
+        $driverConfig = $this->config->get("texto.{$name}", []);
+
         return match ($driver) {
-            Driver::Twilio => new TwilioSender($this->config['twilio'] ?? []),
-            Driver::Telnyx => new TelnyxSender($this->config['telnyx'] ?? []),
+            Driver::Twilio => new TwilioSender(is_array($driverConfig) ? $driverConfig : []),
+            Driver::Telnyx => new TelnyxSender(is_array($driverConfig) ? $driverConfig : []),
             default => throw new \InvalidArgumentException("Unsupported driver: {$name}"),
         };
     }

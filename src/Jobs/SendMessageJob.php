@@ -16,7 +16,7 @@ class SendMessageJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    /** @param array{from?:string, media_urls?:string[], metadata?:array, driver?:string} $options */
+    /** @param array{from?:string, media_urls?:string[], metadata?:array, driver?:string, driver_config?:array<string,mixed>} $options */
     public function __construct(
         public int $messageId,
         public string $to,
