@@ -556,9 +556,9 @@ Auto‑registered routes (POST):
 | Purpose | Twilio                                  | Telnyx                         |
 | ------- | --------------------------------------- | ------------------------------ |
 | Inbound | `/texto/webhook/twilio`                 | `/texto/webhook/telnyx`        |
-| Status  | (status combined in inbound for Twilio) | `/texto/webhook/telnyx/status` |
+| Status  | `/texto/webhook/twilio` (same endpoint) | `/texto/webhook/telnyx` (same endpoint) |
 
-Twilio combines inbound + status; for status callbacks it sends `MessageStatus` / `MessageSid` which Texto detects first.
+Both providers now publish inbound and status callbacks to a **single endpoint**. Texto inspects each payload to determine whether it is an inbound message or a delivery status update, ensuring identical processing for Twilio and Telnyx.
 
 Each request passes through:
 
@@ -574,7 +574,7 @@ Inbound payloads are normalized into `WebhookProcessingResult` then persisted vi
 | Mechanism            | Description                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------------- |
 | Twilio Signature     | Validated via `RequestValidator` unless `TEXTO_TESTING_SKIP_WEBHOOK_VALIDATION` in testing. |
-| Telnyx Signature     | Placeholder (extend handler to add HMAC verification).                                      |
+| Telnyx Signature     | Validated via Ed25519 signature (Telnyx public webhook key, sodium required).               |
 | Shared Secret Header | Add `TEXTO_WEBHOOK_SECRET` and send header `X-Texto-Secret`.                                |
 | Rate Limiting        | Middleware prevents abuse of webhook endpoints.                                             |
 | Phone Parsing        | All numbers canonicalized using libphonenumber.                                             |
@@ -1638,9 +1638,8 @@ These are nullable and backward compatible.
 
 Webhook routes remain the same but include enhanced validation:
 
--   `/texto/webhook/twilio` - Twilio webhooks (SMS + status)
--   `/texto/webhook/telnyx` - Telnyx inbound messages
--   `/texto/webhook/telnyx/status` - Telnyx status updates
+-   `/texto/webhook/twilio` - Twilio webhooks (inbound + status)
+-   `/texto/webhook/telnyx` - Telnyx webhooks (inbound + status)
 
 Ensure your provider console webhook URLs match exactly.
 
