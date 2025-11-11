@@ -7,10 +7,10 @@ namespace Awaisjameel\Texto\Webhooks;
 use Awaisjameel\Texto\Contracts\WebhookHandlerInterface;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Exceptions\TextoWebhookValidationException;
+use Awaisjameel\Texto\Support\TwilioSignatureValidator;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
 use Illuminate\Http\Request;
-use Twilio\Security\RequestValidator;
 
 class TwilioWebhookHandler implements WebhookHandlerInterface
 {
@@ -29,10 +29,10 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
             throw new TextoWebhookValidationException('Twilio auth token missing for webhook validation.');
         }
         if (! $skipValidation) {
-            $validator = new RequestValidator($token);
             $signature = $request->header('X-Twilio-Signature');
             $url = $request->fullUrl();
-            if (! $signature || ! $validator->validate($signature, $url, $request->all())) {
+            $params = $request->all();
+            if (! $signature || ! TwilioSignatureValidator::validate($token, $url, $params, $signature)) {
                 throw new TextoWebhookValidationException('Invalid Twilio webhook signature.');
             }
         }

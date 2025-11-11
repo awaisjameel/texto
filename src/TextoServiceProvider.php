@@ -12,6 +12,7 @@ use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
 use Awaisjameel\Texto\Repositories\EloquentMessageRepository;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Support\Facades\Http;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 
@@ -27,6 +28,8 @@ class TextoServiceProvider extends PackageServiceProvider
         $package
             ->name('texto')
             ->hasConfigFile()
+            // Additional Twilio-specific config separated for clarity in adapter migration
+            ->hasConfigFile('twilio')
             ->hasViews()
             ->hasMigration('create_texto_messages_table')
             ->hasRoute('web')
@@ -40,6 +43,25 @@ class TextoServiceProvider extends PackageServiceProvider
         // Bind the driver manager singleton
         $this->app->singleton(DriverManagerInterface::class, function ($app) {
             return new DriverManager($app['config']);
+        });
+        // Twilio API adapter bindings (only when credentials present)
+        $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface::class, function () {
+            return new \Awaisjameel\Texto\Support\TwilioMessagingApi(
+                config('twilio.account_sid'),
+                config('twilio.auth_token')
+            );
+        });
+        $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioConversationsApiInterface::class, function () {
+            return new \Awaisjameel\Texto\Support\TwilioConversationsApi(
+                config('twilio.account_sid'),
+                config('twilio.auth_token')
+            );
+        });
+        $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioContentApiInterface::class, function () {
+            return new \Awaisjameel\Texto\Support\TwilioContentApi(
+                config('twilio.account_sid'),
+                config('twilio.auth_token')
+            );
         });
 
         // Message repository binding
@@ -66,6 +88,28 @@ class TextoServiceProvider extends PackageServiceProvider
 
     public function packageBooted(): void
     {
+        // Register Twilio HTTP macro for unified direct REST calls (messaging|conversations|content)
+        if (! Http::hasMacro('twilio')) {
+            Http::macro('twilio', function (string $api = 'messaging') {
+                $sid = config('twilio.account_sid');
+                $token = config('twilio.auth_token');
+                $base = config("twilio.base_urls.$api");
+                $timeout = (int) config('twilio.timeout', 15);
+                $client = Http::withBasicAuth($sid, $token)->timeout($timeout);
+                // Twilio REST APIs universally accept form-encoded params; use form for messaging + conversations.
+                // Content API accepts JSON (template creation/search); keep JSON for 'content'.
+                if ($api === 'content') {
+                    $client = $client->acceptJson()->asJson();
+                } else {
+                    $client = $client->asForm();
+                }
+                if ($base) {
+                    $client = $client->baseUrl($base);
+                }
+
+                return $client;
+            });
+        }
         // Auto-schedule the status polling job so users do NOT need to add it manually to Console\Kernel.
         // Controlled via config('texto.status_polling.enabled'). Disable there or via ENV if not desired.
         if (config('texto.status_polling.enabled')) {
