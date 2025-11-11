@@ -12,18 +12,21 @@ use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Support\Retry;
 use Awaisjameel\Texto\Support\StatusMapper;
-use Awaisjameel\Texto\Support\TwilioContentService;
+// Deprecated SDK-based content service import removed; using HTTP adapter
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Illuminate\Support\Facades\Log;
-use Twilio\Exceptions\RestException as TwilioRestException;
-use Twilio\Rest\Client as TwilioClient;
+use Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface;
+use Awaisjameel\Texto\Contracts\TwilioConversationsApiInterface;
+use Awaisjameel\Texto\Contracts\TwilioContentApiInterface;
+use Awaisjameel\Texto\Exceptions\TwilioApiException;
 
 class TwilioSender implements MessageSenderInterface, PollableMessageSenderInterface
 {
-    protected TwilioClient $client;
+    protected TwilioMessagingApiInterface $messagingApi;
 
-    protected ?\Twilio\Rest\Conversations\V1 $conversationsClient = null;
+    protected TwilioConversationsApiInterface $conversationsApi;
+    protected TwilioContentApiInterface $contentApi;
 
     protected ?string $smsTemplateSid = null;
 
@@ -33,10 +36,19 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
     {
         $sid = $config['account_sid'] ?? null;
         $token = $config['auth_token'] ?? null;
-        if (! $sid || ! $token) {
+        if (!$sid || !$token) {
             throw new TextoSendFailedException('Twilio credentials missing.');
         }
-        $this->client = new TwilioClient($sid, $token);
+        // Resolve adapters from container if available; fallback to manual instantiation.
+        $this->messagingApi = app()->bound(TwilioMessagingApiInterface::class)
+            ? app(TwilioMessagingApiInterface::class)
+            : new \Awaisjameel\Texto\Support\TwilioMessagingApi($sid, $token);
+        $this->conversationsApi = app()->bound(TwilioConversationsApiInterface::class)
+            ? app(TwilioConversationsApiInterface::class)
+            : new \Awaisjameel\Texto\Support\TwilioConversationsApi($sid, $token);
+        $this->contentApi = app()->bound(TwilioContentApiInterface::class)
+            ? app(TwilioContentApiInterface::class)
+            : new \Awaisjameel\Texto\Support\TwilioContentApi($sid, $token);
     }
 
     /**
@@ -56,34 +68,35 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
     {
 
         $fromNumber = $from?->e164 ?? ($this->config['from_number'] ?? null);
-        if (! $fromNumber) {
+        if (!$fromNumber) {
             throw new TextoSendFailedException('Twilio from number not configured.');
         }
 
         $useConversations = ($this->config['use_conversations'] ?? true) === true;
 
         if ($useConversations) {
-            if ($this->conversationsClient === null) {
-                $this->conversationsClient = $this->client->conversations->v1;
-            }
-
             return $this->sendViaConversations($to, $body, $fromNumber, $mediaUrls, $metadata);
         }
-        // Legacy direct message path
+        // Direct Messages API path via adapter
         try {
-            $message = Retry::exponential(function () use ($to, $fromNumber, $body, $mediaUrls) {
-                return $this->client->messages->create($to->e164, [
-                    'from' => $fromNumber,
-                    'body' => $body,
-                    ...(empty($mediaUrls) ? [] : ['mediaUrl' => $mediaUrls]),
-                ]);
+            $raw = Retry::exponential(function () use ($to, $fromNumber, $body, $mediaUrls) {
+                return $this->messagingApi->sendMessage(
+                    $to->e164,
+                    $fromNumber,
+                    $body,
+                    $mediaUrls,
+                    []
+                );
             }, (int) config('texto.retry.max_attempts', 3), (int) config('texto.retry.backoff_start_ms', 200));
+        } catch (TwilioApiException $e) {
+            Log::error('Texto Twilio (legacy REST) send failed', ['error' => $e->getMessage(), 'status' => $e->status, 'code' => $e->twilioCode]);
+            throw new TextoSendFailedException('Twilio send failed: ' . $e->getMessage());
         } catch (\Throwable $e) {
-            Log::error('Texto Twilio (legacy) send failed', ['error' => $e->getMessage()]);
-            throw new TextoSendFailedException('Twilio send failed: '.$e->getMessage());
+            Log::error('Texto Twilio (legacy REST unexpected) send failed', ['error' => $e->getMessage()]);
+            throw new TextoSendFailedException('Twilio send failed: ' . $e->getMessage());
         }
 
-        $providerSid = $message->sid ?? ($message->messageSid ?? null);
+        $providerSid = $raw['sid'] ?? $raw['message_sid'] ?? null;
         $result = new SentMessageResult(
             Driver::Twilio,
             Direction::Sent,
@@ -115,23 +128,20 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
     protected function sendViaConversations(PhoneNumber $to, string $body, string $fromNumber, array $mediaUrls, array $metadata): SentMessageResult
     {
 
-        if ($this->conversationsClient === null) {
-            $this->conversationsClient = $this->client->conversations->v1;
-        }
         $this->initializeTemplates();
 
         // 1. Create a conversation (ephemeral per send initially)
         $prefix = $this->config['conversation_prefix'] ?? 'Texto';
-        $friendlyName = $prefix.'-'.$to->e164.'-'.bin2hex(random_bytes(4));
+        $friendlyName = $prefix . '-' . $to->e164 . '-' . bin2hex(random_bytes(4));
         try {
-            $newConversation = $this->conversationsClient->conversations->create(['FriendlyName' => $friendlyName]);
-        } catch (\Throwable $e) {
+            $newConversation = $this->conversationsApi->createConversation($friendlyName);
+        } catch (TwilioApiException $e) {
             Log::error('Failed to create Twilio Conversation', ['error' => $e->getMessage()]);
-            throw new TextoSendFailedException('Unable to create Twilio Conversation: '.$e->getMessage());
+            throw new TextoSendFailedException('Unable to create Twilio Conversation: ' . $e->getMessage());
         }
 
-        $conversationSid = $newConversation->sid ?? null;
-        if (! $conversationSid) {
+        $conversationSid = $newConversation['sid'] ?? null;
+        if (!$conversationSid) {
             throw new TextoSendFailedException('Twilio Conversation creation returned no SID.');
         }
 
@@ -139,24 +149,13 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
 
         // 2. Attempt to add recipient participant. If duplicate (50416) is detected, try to parse existing conversation SID and reuse it.
         try {
-            $this->conversationsClient
-                ->conversations($conversationSid)
-                ->participants
-                ->create([
-                    'messagingBindingAddress' => $to->e164,
-                    'messagingBindingProxyAddress' => $fromNumber,
-                ]);
-        } catch (TwilioRestException $e) {
-            if ($e->getCode() === 50416) { // Duplicate participant binding
+            $this->conversationsApi->addParticipant($conversationSid, $to->e164, $fromNumber);
+        } catch (TwilioApiException $e) {
+            // Twilio duplicate participant error code is 50416 (reported in SDK); check body code
+            if ((int) ($e->twilioCode ?? 0) === 50416) {
                 $existingSid = $this->parseConversationSidFromError($e->getMessage());
                 if ($existingSid && $existingSid !== $conversationSid) {
-                    // Delete the freshly created conversation (best-effort) and reuse existing
-                    try {
-                        $this->conversationsClient->conversations($conversationSid)->delete();
-                        Log::debug('Deleted newly created Twilio Conversation after detecting existing participant.', ['conversation_sid' => $conversationSid]);
-                    } catch (\Throwable $del) {
-                        Log::debug('Failed to delete newly created Twilio Conversation after duplicate participant.', ['conversation_sid' => $conversationSid, 'error' => $del->getMessage()]);
-                    }
+                    $this->conversationsApi->deleteConversation($conversationSid);
                     $conversationSid = $existingSid;
                     $reusedConversation = true;
                     Log::info('Reusing existing Twilio Conversation for participant.', ['conversation_sid' => $conversationSid, 'to' => $to->e164]);
@@ -165,11 +164,8 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
                 }
             } else {
                 Log::error('Failed to add initial participant to Twilio Conversation', ['conversation_sid' => $conversationSid, 'error' => $e->getMessage()]);
-                throw new TextoSendFailedException('Unable to add participant to Twilio Conversation: '.$e->getMessage());
+                throw new TextoSendFailedException('Unable to add participant to Twilio Conversation: ' . $e->getMessage());
             }
-        } catch (\Throwable $e) {
-            Log::error('Unexpected participant add exception', ['conversation_sid' => $conversationSid, 'error' => $e->getMessage()]);
-            throw new TextoSendFailedException('Unable to add participant to Twilio Conversation: '.$e->getMessage());
         }
 
         // 2b. Ensure system/from participant exists (duplicate tolerated silently)
@@ -189,31 +185,28 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
 
         $useContentTemplate = $contentSid !== null;
         $messageData = [
-            'author' => $fromNumber,
+            'Author' => $fromNumber,
             ...($useContentTemplate ? [
-                'contentSid' => $contentSid,
-                'contentVariables' => json_encode($contentVariables),
-            ] : ['body' => $body]),
+                'ContentSid' => $contentSid,
+                'ContentVariables' => json_encode($contentVariables),
+            ] : ['Body' => $body]),
         ];
 
         // 4. Send message within conversation (with fallback if template fails)
         try {
-            $sent = $this->conversationsClient->conversations($conversationSid)->messages->create($messageData);
-        } catch (TwilioRestException $e) {
-            if ($useContentTemplate && $e->getCode() === 20404) { // Not Found or template mismatch fallback
+            $sentRaw = $this->conversationsApi->sendConversationMessage($conversationSid, $messageData);
+        } catch (TwilioApiException $e) {
+            if ($useContentTemplate && $e->status === 404) { // fallback on template not found
                 Log::warning('Template send failed, retrying with body fallback.', ['conversation_sid' => $conversationSid, 'error' => $e->getMessage()]);
-                $messageDataFallback = ['author' => $fromNumber, 'body' => $body];
-                $sent = $this->conversationsClient->conversations($conversationSid)->messages->create($messageDataFallback);
+                $messageDataFallback = ['Author' => $fromNumber, 'Body' => $body];
+                $sentRaw = $this->conversationsApi->sendConversationMessage($conversationSid, $messageDataFallback);
             } else {
                 Log::error('Twilio Conversation message send failed', ['conversation_sid' => $conversationSid, 'error' => $e->getMessage()]);
-                throw new TextoSendFailedException('Twilio Conversation send failed: '.$e->getMessage());
+                throw new TextoSendFailedException('Twilio Conversation send failed: ' . $e->getMessage());
             }
-        } catch (\Throwable $e) {
-            Log::error('Unexpected Twilio Conversation send exception', ['conversation_sid' => $conversationSid, 'error' => $e->getMessage()]);
-            throw new TextoSendFailedException('Twilio Conversation send failed: '.$e->getMessage());
         }
 
-        $providerSid = $sent->sid ?? ($sent->messageSid ?? null);
+        $providerSid = $sentRaw['sid'] ?? $sentRaw['message_sid'] ?? null;
         $result = new SentMessageResult(
             Driver::Twilio,
             Direction::Sent,
@@ -252,17 +245,14 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
         $friendlySms = $this->config['sms_template_friendly_name'] ?? 'texto_sms_template';
         $friendlyMms = $this->config['mms_template_friendly_name'] ?? 'texto_mms_template';
 
-        $content = new TwilioContentService(
-            $this->config['account_sid'],
-            $this->config['auth_token']
-        );
+        $content = $this->contentApi;
 
         try {
-            if (! $this->smsTemplateSid) {
-                $this->smsTemplateSid = $content->ensureTemplate($friendlySms, fn () => $this->defaultSmsTemplateDefinition($friendlySms));
+            if (!$this->smsTemplateSid) {
+                $this->smsTemplateSid = $content->ensureTemplate($friendlySms, fn() => $this->defaultSmsTemplateDefinition($friendlySms));
             }
-            if (! $this->mmsTemplateSid) {
-                $this->mmsTemplateSid = $content->ensureTemplate($friendlyMms, fn () => $this->defaultMmsTemplateDefinition($friendlyMms));
+            if (!$this->mmsTemplateSid) {
+                $this->mmsTemplateSid = $content->ensureTemplate($friendlyMms, fn() => $this->defaultMmsTemplateDefinition($friendlyMms));
             }
         } catch (\Throwable $e) {
             // Non-fatal: we can still fallback to body-only sending.
@@ -308,7 +298,7 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
             'types' => [
                 'twilio/media' => [
                     'body' => '{{message_body_1}}{{message_body_2}}{{message_body_3}}{{message_body_4}}{{message_body_5}}',
-                    'media' => [env('APP_URL').'/{{media_path}}'],
+                    'media' => [env('APP_URL') . '/{{media_path}}'],
                 ],
             ],
         ];
@@ -326,7 +316,7 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
         $parts = str_split($body, 100);
         $vars = [];
         for ($i = 1; $i <= 5; $i++) {
-            $vars['message_body_'.$i] = $parts[$i - 1] ?? '';
+            $vars['message_body_' . $i] = $parts[$i - 1] ?? '';
         }
         if ($mediaUrl) {
             $path = parse_url($mediaUrl, PHP_URL_PATH) ?: '';
@@ -340,15 +330,9 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
     protected function addParticipantSilently(string $conversationSid, string $address, string $proxy): void
     {
         try {
-            $this->conversationsClient
-                ->conversations($conversationSid)
-                ->participants
-                ->create([
-                    'messagingBindingAddress' => $address,
-                    'messagingBindingProxyAddress' => $proxy,
-                ]);
-        } catch (TwilioRestException $e) {
-            if ($e->getCode() === 50416) { // Duplicate participant; ignore
+            $this->conversationsApi->addParticipant($conversationSid, $address, $proxy);
+        } catch (TwilioApiException $e) {
+            if ((int) ($e->twilioCode ?? 0) === 50416) {
                 Log::debug('Participant already exists in conversation', ['conversation_sid' => $conversationSid, 'address' => $address]);
             } else {
                 Log::warning('Failed to add participant (non-fatal)', ['conversation_sid' => $conversationSid, 'address' => $address, 'error' => $e->getMessage()]);
@@ -387,39 +371,24 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
      */
     protected function attachConversationWebhook(string $conversationSid, string $webhookUrl): ?string
     {
-        // Normalize URL (allow relative path by converting to app URL base if needed)
-        if (! str_starts_with($webhookUrl, 'http')) {
+        if (!str_starts_with($webhookUrl, 'http')) {
             $appUrl = config('app.url');
             if ($appUrl) {
-                $webhookUrl = rtrim($appUrl, '/').'/'.ltrim($webhookUrl, '/');
+                $webhookUrl = rtrim($appUrl, '/') . '/' . ltrim($webhookUrl, '/');
             }
         }
-
         try {
-            $existing = $this->conversationsClient->conversations($conversationSid)->webhooks->read(20);
-            foreach ($existing as $wh) {
-                try {
-                    $wh->delete();
-                } catch (\Throwable $inner) {
-                    Log::debug('Failed to delete existing conversation webhook (continuing)', ['conversation_sid' => $conversationSid, 'webhook_sid' => $wh->sid, 'error' => $inner->getMessage()]);
-                }
+            $created = $this->conversationsApi->attachWebhook($conversationSid, $webhookUrl);
+            $sid = $created['sid'] ?? null;
+            if ($sid) {
+                Log::info('Attached Twilio Conversation webhook', ['conversation_sid' => $conversationSid, 'webhook_sid' => $sid, 'url' => $webhookUrl]);
             }
-            $created = $this->conversationsClient->conversations($conversationSid)->webhooks->create('webhook', [
-                'configurationMethod' => 'POST',
-                'configurationFilters' => ['onMessageAdded', 'onMessageUpdated'],
-                'configurationTriggers' => ['onMessageAdded', 'onMessageUpdated'],
-                'configurationUrl' => $webhookUrl,
-                'configurationReplayAfter' => 0,
-            ]);
-            Log::info('Attached Twilio Conversation webhook', ['conversation_sid' => $conversationSid, 'webhook_sid' => $created->sid, 'url' => $webhookUrl]);
-
-            return $created->sid ?? null;
-        } catch (TwilioRestException $e) {
+            return $sid;
+        } catch (TwilioApiException $e) {
             Log::warning('Failed to attach Twilio Conversation webhook (non-fatal)', ['conversation_sid' => $conversationSid, 'url' => $webhookUrl, 'error' => $e->getMessage()]);
         } catch (\Throwable $e) {
             Log::warning('Unexpected error attaching Conversation webhook (non-fatal)', ['conversation_sid' => $conversationSid, 'url' => $webhookUrl, 'error' => $e->getMessage()]);
         }
-
         return null;
     }
 
@@ -436,7 +405,7 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
     public function fetchStatus(string $providerMessageId, mixed ...$context): ?MessageStatus
     {
         $conversationSid = null;
-        if (! empty($context)) {
+        if (!empty($context)) {
             $candidate = $context[0] ?? null;
             $conversationSid = is_string($candidate) ? $candidate : null;
         }
@@ -445,14 +414,7 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
         // Attempt conversation fetch first if we have a conversation SID.
         if ($useConversations && $conversationSid) {
             try {
-                if ($this->conversationsClient === null) {
-                    // Lazy init to avoid overhead when not sending in this lifecycle.
-                    $this->conversationsClient = $this->client->conversations->v1;
-                }
-                $message = $this->conversationsClient
-                    ->conversations($conversationSid)
-                    ->messages($providerMessageId)
-                    ->fetch();
+                $message = $this->conversationsApi->fetchConversationMessage($conversationSid, $providerMessageId);
 
                 // Log::info('Texto Twilio fetchStatus (conversation) response received', [
                 //     'conversation_sid' => $conversationSid,
@@ -463,33 +425,22 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
                 // Conversation message status fields can vary; attempt several common keys.
                 $raw = null;
                 // 1. Direct status property (rare)
-                if (isset($message->status)) {
-                    $raw = $message->status;
+                if (isset($message['status'])) {
+                    $raw = $message['status'];
                 }
                 // 2. Delivery sub-object (deliveryStatus or status/state)
-                if (! $raw && isset($message->delivery)) {
-                    $delivery = $message->delivery;
-                    if (is_object($delivery)) {
-                        $raw = $delivery->deliveryStatus ?? $delivery->status ?? $delivery->state ?? null;
-                    } elseif (is_array($delivery)) {
+                if (!$raw && isset($message['delivery'])) {
+                    $delivery = $message['delivery'];
+                    if (is_array($delivery)) {
                         $raw = $delivery['deliveryStatus'] ?? $delivery['status'] ?? $delivery['state'] ?? null;
                     }
                 }
                 // 3. Fallback to delivery receipts for the first participant (if available)
-                if (! $raw && isset($message->delivery)) {
-                    $deliveryAny = $message->delivery;
-                    $receipts = null;
-                    if (is_object($deliveryAny)) {
-                        $receipts = $deliveryAny->receipts ?? null;
-                    } elseif (is_array($deliveryAny)) {
-                        $receipts = $deliveryAny['receipts'] ?? null;
-                    }
+                if (!$raw && isset($message['delivery'])) {
+                    $receipts = $message['delivery']['receipts'] ?? null;
                     if ($receipts && is_iterable($receipts)) {
                         foreach ($receipts as $r) {
-                            if (is_object($r) && isset($r->status)) {
-                                $raw = $r->status;
-                                break;
-                            } elseif (is_array($r) && isset($r['status'])) {
+                            if (is_array($r) && isset($r['status'])) {
                                 $raw = $r['status'];
                                 break;
                             }
@@ -524,17 +475,16 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
 
         // Legacy/direct Messages API fetch path.
         try {
-            $message = $this->client->messages($providerMessageId)->fetch();
-            // Log::info('Texto Twilio fetchStatus (legacy) response received', ['id' => $providerMessageId]);
-            $raw = $message->status ?? null; // queued, accepted, sending, sent, delivered, failed, undelivered
-            if (! $raw) {
+            $message = $this->messagingApi->fetchMessage($providerMessageId);
+            $raw = $message['status'] ?? null;
+            if (!$raw) {
                 return null;
             }
-            // Log::info('Texto Twilio fetchStatus (legacy) parsed', ['id' => $providerMessageId, 'raw_status' => $raw]);
-
             return StatusMapper::map(Driver::Twilio, $raw, null);
-        } catch (\Throwable $e) {
+        } catch (TwilioApiException $e) {
             Log::warning('Twilio fetchStatus (legacy) failed', ['sid' => $providerMessageId, 'error' => $e->getMessage()]);
+        } catch (\Throwable $e) {
+            Log::warning('Twilio fetchStatus (legacy unexpected) failed', ['sid' => $providerMessageId, 'error' => $e->getMessage()]);
         }
 
         return null;

@@ -10,7 +10,7 @@ use Awaisjameel\Texto\Exceptions\TextoWebhookValidationException;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
 use Illuminate\Http\Request;
-use Twilio\Security\RequestValidator;
+use Awaisjameel\Texto\Support\TwilioSignatureValidator;
 
 class TwilioWebhookHandler implements WebhookHandlerInterface
 {
@@ -25,14 +25,14 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
     {
         $skipValidation = config('texto.testing.skip_webhook_validation', false) && app()->environment('testing');
         $token = $this->config['auth_token'] ?? null;
-        if (! $token) {
+        if (!$token) {
             throw new TextoWebhookValidationException('Twilio auth token missing for webhook validation.');
         }
-        if (! $skipValidation) {
-            $validator = new RequestValidator($token);
+        if (!$skipValidation) {
             $signature = $request->header('X-Twilio-Signature');
             $url = $request->fullUrl();
-            if (! $signature || ! $validator->validate($signature, $url, $request->all())) {
+            $params = $request->all();
+            if (!$signature || !TwilioSignatureValidator::validate($token, $url, $params, $signature)) {
                 throw new TextoWebhookValidationException('Invalid Twilio webhook signature.');
             }
         }
@@ -48,7 +48,7 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
         // Conversations webhook path (EventType present) fallback to classic messaging otherwise
         $eventType = $request->input('EventType');
         if ($eventType) {
-            if (! in_array($eventType, ['onMessageAdded', 'onMessageUpdated'])) {
+            if (!in_array($eventType, ['onMessageAdded', 'onMessageUpdated'])) {
                 // Ignore unrelated conversation events by returning a minimal received placeholder (could also throw)
                 throw new TextoWebhookValidationException('Unsupported Twilio conversation event type.');
             }
@@ -60,7 +60,7 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
                 try {
                     $to = PhoneNumber::fromString($fromNumberConfigured);
                 } catch (\Throwable $e) {
-                    throw new TextoWebhookValidationException('Invalid configured Twilio from number: '.$e->getMessage(), 0, $e);
+                    throw new TextoWebhookValidationException('Invalid configured Twilio from number: ' . $e->getMessage(), 0, $e);
                 }
             } else {
                 $to = $this->parsePhoneOrFail($authorRaw, 'author');
@@ -90,7 +90,7 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
         $media = [];
         $mediaCount = (int) $request->input('NumMedia', 0);
         for ($i = 0; $i < $mediaCount; $i++) {
-            $mediaUrl = $request->input('MediaUrl'.$i);
+            $mediaUrl = $request->input('MediaUrl' . $i);
             if ($mediaUrl) {
                 $media[] = $mediaUrl;
             }
@@ -102,13 +102,13 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
 
     protected function parsePhoneOrFail(?string $raw, string $field): PhoneNumber
     {
-        if (! $raw) {
+        if (!$raw) {
             throw new TextoWebhookValidationException("Twilio payload missing {$field} phone number.");
         }
         try {
             return PhoneNumber::fromString($raw);
         } catch (\Throwable $e) {
-            throw new TextoWebhookValidationException("Invalid {$field} phone number supplied: ".$e->getMessage(), 0, $e);
+            throw new TextoWebhookValidationException("Invalid {$field} phone number supplied: " . $e->getMessage(), 0, $e);
         }
     }
 }
