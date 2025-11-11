@@ -21,10 +21,10 @@ class TwilioSignatureValidator
             if (is_array($v)) {
                 // Flatten arrays (Twilio sends arrays rarely in status callbacks; treat each value)
                 foreach ($v as $item) {
-                    $data .= $k . $item;
+                    $data .= $k.$item;
                 }
             } else {
-                $data .= $k . $v;
+                $data .= $k.$v;
             }
         }
         $expected = base64_encode(hash_hmac('sha1', $data, $authToken, true));
@@ -32,6 +32,7 @@ class TwilioSignatureValidator
         if (function_exists('hash_equals')) {
             return hash_equals($expected, $provided);
         }
+
         return $expected === $provided;
     }
 }

@@ -15,14 +15,13 @@ use Illuminate\Support\Facades\Log;
 
 class TwilioConversationsApi implements TwilioConversationsApiInterface
 {
-    public function __construct(protected string $accountSid, protected string $authToken)
-    {
-    }
+    public function __construct(protected string $accountSid, protected string $authToken) {}
 
     public function createConversation(string $friendlyName, array $params = []): array
     {
         $payload = ['FriendlyName' => $friendlyName] + $params;
         $resp = Http::twilio('conversations')->post('/Conversations', $payload);
+
         return $this->handle($resp, 'createConversation');
     }
 
@@ -32,26 +31,28 @@ class TwilioConversationsApi implements TwilioConversationsApiInterface
             'MessagingBinding.Address' => $address,
             'MessagingBinding.ProxyAddress' => $proxyAddress,
         ] + $params;
-        $resp = Http::twilio('conversations')->post('/Conversations/' . $conversationSid . '/Participants', $payload);
+        $resp = Http::twilio('conversations')->post('/Conversations/'.$conversationSid.'/Participants', $payload);
+
         return $this->handle($resp, 'addParticipant', ['conversation_sid' => $conversationSid]);
     }
 
     public function sendConversationMessage(string $conversationSid, array $payload): array
     {
-        $resp = Http::twilio('conversations')->post('/Conversations/' . $conversationSid . '/Messages', $payload);
+        $resp = Http::twilio('conversations')->post('/Conversations/'.$conversationSid.'/Messages', $payload);
+
         return $this->handle($resp, 'sendConversationMessage', ['conversation_sid' => $conversationSid]);
     }
 
     public function attachWebhook(string $conversationSid, string $url, array $filters = ['onMessageAdded', 'onMessageUpdated'], array $triggers = []): ?array
     {
         // Delete existing webhooks first (best-effort)
-        $existing = Http::twilio('conversations')->get('/Conversations/' . $conversationSid . '/Webhooks');
+        $existing = Http::twilio('conversations')->get('/Conversations/'.$conversationSid.'/Webhooks');
         if ($existing->successful()) {
             $items = $existing->json('webhooks') ?? [];
             foreach ($items as $w) {
                 $sid = $w['sid'] ?? null;
                 if ($sid) {
-                    Http::twilio('conversations')->delete('/Conversations/' . $conversationSid . '/Webhooks/' . $sid);
+                    Http::twilio('conversations')->delete('/Conversations/'.$conversationSid.'/Webhooks/'.$sid);
                 }
             }
         }
@@ -63,24 +64,27 @@ class TwilioConversationsApi implements TwilioConversationsApiInterface
             'Configuration.Triggers' => implode(',', $triggers ?: $filters),
             'Configuration.ReplayAfter' => 0,
         ];
-        $resp = Http::twilio('conversations')->post('/Conversations/' . $conversationSid . '/Webhooks', $payload);
+        $resp = Http::twilio('conversations')->post('/Conversations/'.$conversationSid.'/Webhooks', $payload);
         $data = $this->handle($resp, 'attachWebhook', ['conversation_sid' => $conversationSid]);
+
         return $data ?: null;
     }
 
     public function fetchConversationMessage(string $conversationSid, string $messageSid): array
     {
-        $resp = Http::twilio('conversations')->get('/Conversations/' . $conversationSid . '/Messages/' . $messageSid);
+        $resp = Http::twilio('conversations')->get('/Conversations/'.$conversationSid.'/Messages/'.$messageSid);
+
         return $this->handle($resp, 'fetchConversationMessage', ['conversation_sid' => $conversationSid, 'message_sid' => $messageSid]);
     }
 
     public function deleteConversation(string $conversationSid): bool
     {
-        $resp = Http::twilio('conversations')->delete('/Conversations/' . $conversationSid);
+        $resp = Http::twilio('conversations')->delete('/Conversations/'.$conversationSid);
         if ($resp->successful() || $resp->status() === 204) {
             return true;
         }
         Log::debug('Failed to delete conversation', ['conversation_sid' => $conversationSid, 'status' => $resp->status()]);
+
         return false;
     }
 

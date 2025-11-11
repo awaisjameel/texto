@@ -4,6 +4,4 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto\Exceptions;
 
-class TwilioApiNotFoundException extends TwilioApiException
-{
-}
+class TwilioApiNotFoundException extends TwilioApiException {}

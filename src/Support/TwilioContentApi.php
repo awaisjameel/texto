@@ -13,9 +13,7 @@ use Throwable;
 
 class TwilioContentApi implements TwilioContentApiInterface
 {
-    public function __construct(protected string $accountSid, protected string $authToken)
-    {
-    }
+    public function __construct(protected string $accountSid, protected string $authToken) {}
 
     public function findTemplateByFriendlyName(string $friendlyName): ?array
     {
@@ -35,6 +33,7 @@ class TwilioContentApi implements TwilioContentApiInterface
                 return $record;
             }
         }
+
         return null;
     }
 
@@ -51,15 +50,18 @@ class TwilioContentApi implements TwilioContentApiInterface
                 $response = Http::twilio('content')->post('/Content', $attempt['body']);
             } catch (Throwable $e) {
                 Log::warning('Twilio Content template create HTTP exception', ['variant' => $attempt['variant'], 'error' => $e->getMessage()]);
+
                 continue;
             }
             if ($response->successful()) {
                 $sid = $response->json('sid');
                 if ($sid) {
                     Log::info('Twilio Content template created', ['friendly_name' => $definition['friendly_name'] ?? null, 'sid' => $sid]);
+
                     return $sid;
                 }
                 Log::error('Twilio Content success response missing SID', ['variant' => $attempt['variant'], 'body' => $response->body()]);
+
                 continue;
             }
             Log::warning('Twilio Content template create failed variant', ['variant' => $attempt['variant'], 'status' => $response->status(), 'body' => $response->body()]);
@@ -79,10 +81,12 @@ class TwilioContentApi implements TwilioContentApiInterface
             $sid = Arr::get($existing, 'sid');
             if ($sid) {
                 Log::info('Reusing existing Twilio Content template', ['friendly_name' => $friendlyName, 'sid' => $sid]);
+
                 return $sid;
             }
         }
         $definition = $definitionFactory();
+
         return $this->createTemplate($definition);
     }
 
@@ -98,6 +102,7 @@ class TwilioContentApi implements TwilioContentApiInterface
         foreach ($payload as $k => $v) {
             $out[$map[$k] ?? $k] = $v;
         }
+
         return $out;
     }
 }

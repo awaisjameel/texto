@@ -4,6 +4,4 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto\Exceptions;
 
-class TwilioApiRateLimitException extends TwilioApiException
-{
-}
+class TwilioApiRateLimitException extends TwilioApiException {}

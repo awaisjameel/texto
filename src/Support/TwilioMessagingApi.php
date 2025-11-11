@@ -15,13 +15,11 @@ use Illuminate\Support\Facades\Log;
 
 class TwilioMessagingApi implements TwilioMessagingApiInterface
 {
-    public function __construct(protected string $accountSid, protected string $authToken)
-    {
-    }
+    public function __construct(protected string $accountSid, protected string $authToken) {}
 
     public function sendMessage(string $to, string $from, ?string $body, array $mediaUrls = [], array $options = []): array
     {
-        $endpoint = '/Accounts/' . $this->accountSid . '/Messages.json';
+        $endpoint = '/Accounts/'.$this->accountSid.'/Messages.json';
         $payload = [
             'To' => $to,
             'From' => $from,
@@ -34,7 +32,7 @@ class TwilioMessagingApi implements TwilioMessagingApiInterface
         // Build form body manually to support repeated MediaUrl keys
         $form = http_build_query($payload, '', '&', PHP_QUERY_RFC3986);
         foreach ($mediaUrls as $m) {
-            $form .= '&' . 'MediaUrl=' . rawurlencode($m);
+            $form .= '&'.'MediaUrl='.rawurlencode($m);
         }
 
         $response = Http::twilio('messaging')
@@ -53,7 +51,7 @@ class TwilioMessagingApi implements TwilioMessagingApiInterface
 
     public function fetchMessage(string $messageSid): array
     {
-        $endpoint = '/Accounts/' . $this->accountSid . '/Messages/' . $messageSid . '.json';
+        $endpoint = '/Accounts/'.$this->accountSid.'/Messages/'.$messageSid.'.json';
         $response = Http::twilio('messaging')->get($endpoint);
         if ($response->successful()) {
             return $response->json();

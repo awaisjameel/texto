@@ -22,6 +22,6 @@ it('creates template and reuses on ensure', function () {
     });
     expect($sid)->toBe('HX123');
 
-    $sid2 = $api->ensureTemplate('my_template', fn() => []);
+    $sid2 = $api->ensureTemplate('my_template', fn () => []);
     expect($sid2)->toBe('HX123');
 });

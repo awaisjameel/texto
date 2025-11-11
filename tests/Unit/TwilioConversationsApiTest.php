@@ -23,7 +23,7 @@ it('handles participant duplicate', function () {
         'conversations.twilio.com/v1/Conversations' => Http::response(['sid' => 'CH999'], 201),
         'conversations.twilio.com/v1/Conversations/CH999/Participants' => Http::response([
             'code' => 50416,
-            'message' => 'Duplicate participant'
+            'message' => 'Duplicate participant',
         ], 400),
     ]);
 

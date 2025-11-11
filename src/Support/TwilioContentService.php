@@ -9,6 +9,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
+
 // Deprecated legacy helper retained for backward compatibility; now pure HTTP (no twilio/sdk).
 
 /**
@@ -19,9 +20,7 @@ class TwilioContentService
 {
     private const BASE_URL = 'https://content.twilio.com/v1';
 
-    public function __construct(protected string $accountSid, protected string $authToken)
-    {
-    }
+    public function __construct(protected string $accountSid, protected string $authToken) {}
 
     /**
      * Finds template by friendly name. Returns raw record array or null.
@@ -29,7 +28,7 @@ class TwilioContentService
     public function findByFriendlyName(string $friendlyName): ?array
     {
         try {
-            $response = $this->http()->get(self::BASE_URL . '/Content', [
+            $response = $this->http()->get(self::BASE_URL.'/Content', [
                 'FriendlyName' => $friendlyName,
             ]);
         } catch (Throwable $e) {
@@ -71,7 +70,7 @@ class TwilioContentService
 
         foreach ($attempts as $attempt) {
             try {
-                $response = $this->http()->post(self::BASE_URL . '/Content', $attempt['body']);
+                $response = $this->http()->post(self::BASE_URL.'/Content', $attempt['body']);
             } catch (Throwable $e) {
                 Log::warning('Twilio Content template create HTTP exception', ['variant' => $attempt['variant'], 'error' => $e->getMessage()]);
 

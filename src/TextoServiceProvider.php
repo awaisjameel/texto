@@ -12,9 +12,9 @@ use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
 use Awaisjameel\Texto\Repositories\EloquentMessageRepository;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Support\Facades\Http;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
-use Illuminate\Support\Facades\Http;
 
 class TextoServiceProvider extends PackageServiceProvider
 {
@@ -89,7 +89,7 @@ class TextoServiceProvider extends PackageServiceProvider
     public function packageBooted(): void
     {
         // Register Twilio HTTP macro for unified direct REST calls (messaging|conversations|content)
-        if (!Http::hasMacro('twilio')) {
+        if (! Http::hasMacro('twilio')) {
             Http::macro('twilio', function (string $api = 'messaging') {
                 $sid = config('twilio.account_sid');
                 $token = config('twilio.auth_token');
