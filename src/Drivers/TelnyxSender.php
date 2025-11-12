@@ -6,27 +6,30 @@ namespace Awaisjameel\Texto\Drivers;
 
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
 use Awaisjameel\Texto\Contracts\PollableMessageSenderInterface;
+use Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface;
 use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
+use Awaisjameel\Texto\Exceptions\TelnyxApiException;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Support\Retry;
 use Awaisjameel\Texto\Support\StatusMapper;
-use Awaisjameel\Texto\Support\TelnyxApiClient;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Illuminate\Support\Facades\Log;
 
 class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInterface
 {
-    protected TelnyxApiClient $apiClient;
+    protected TelnyxMessagingApiInterface $messagingApi;
 
-    public function __construct(protected array $config, ?TelnyxApiClient $apiClient = null)
+    public function __construct(protected array $config, ?TelnyxMessagingApiInterface $messagingApi = null)
     {
         $apiKey = $this->config['api_key'] ?? null;
         if (! $apiKey) {
             throw new TextoSendFailedException('Telnyx API key missing.');
         }
-        $this->apiClient = $apiClient ?? new TelnyxApiClient($apiKey);
+        $this->messagingApi = $messagingApi ?? (app()->bound(TelnyxMessagingApiInterface::class)
+            ? app(TelnyxMessagingApiInterface::class)
+            : new \Awaisjameel\Texto\Support\TelnyxMessagingApi($apiKey));
     }
 
     /**
@@ -55,15 +58,20 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
         }
 
         try {
-            $response = Retry::exponential(function () use ($payload) {
-                return $this->apiClient->sendMessage($payload);
+            $data = Retry::exponential(function () use ($to, $fromNumber, $body, $mediaUrls, $profileId, $webhookUrl) {
+                $options = ['messaging_profile_id' => $profileId] + ($webhookUrl ? ['webhook_url' => $webhookUrl] : []);
+
+                return $this->messagingApi->sendMessage($to->e164, $fromNumber, $body, $mediaUrls, $options);
             }, (int) config('texto.retry.max_attempts', 3), (int) config('texto.retry.backoff_start_ms', 200));
+        } catch (TelnyxApiException $e) {
+            Log::error('Texto Telnyx API send failed', ['error' => $e->getMessage(), 'status' => $e->status, 'code' => $e->telnyxCode, 'context' => $e->context]);
+            throw new TextoSendFailedException('Telnyx API send failed: '.$e->getMessage(), 0, $e);
         } catch (\Throwable $e) {
             Log::error('Texto Telnyx send failed', ['error' => $e->getMessage()]);
-            throw new TextoSendFailedException('Telnyx send failed: '.$e->getMessage());
+            throw new TextoSendFailedException('Telnyx send failed: '.$e->getMessage(), 0, $e);
         }
 
-        $data = $this->extractData($response['data'] ?? null);
+        $data = $this->extractData($data ?? null);
         $providerId = null;
         $telnyxStatusRaw = null;
         $parts = null;
@@ -118,14 +126,18 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
     public function fetchStatus(string $providerMessageId, mixed ...$context): ?\Awaisjameel\Texto\Enums\MessageStatus
     {
         try {
-            $resp = $this->apiClient->retrieveMessage($providerMessageId);
+            $data = $this->messagingApi->fetchMessage($providerMessageId);
+        } catch (TelnyxApiException $e) {
+            Log::warning('Telnyx fetchStatus API error', ['id' => $providerMessageId, 'error' => $e->getMessage(), 'status' => $e->status]);
+
+            return null;
         } catch (\Throwable $e) {
             Log::warning('Telnyx fetchStatus failed', ['id' => $providerMessageId, 'error' => $e->getMessage()]);
 
             return null;
         }
 
-        $data = $this->extractData($resp['data'] ?? null);
+        $data = $this->extractData($data);
         if (! $data) {
             return null;
         }

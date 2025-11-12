@@ -63,6 +63,12 @@ class TextoServiceProvider extends PackageServiceProvider
                 config('twilio.auth_token')
             );
         });
+        // Telnyx Messaging adapter binding (only when API key present)
+        $this->app->singleton(\Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface::class, function () {
+            $apiKey = config('texto.telnyx.api_key');
+
+            return new \Awaisjameel\Texto\Support\TelnyxMessagingApi($apiKey);
+        });
 
         // Message repository binding
         $this->app->singleton(MessageRepositoryInterface::class, function ($app) {
@@ -108,6 +114,16 @@ class TextoServiceProvider extends PackageServiceProvider
                 }
 
                 return $client;
+            });
+        }
+        // Telnyx macro similar style to Twilio to provide unified PendingRequest builder
+        if (! Http::hasMacro('telnyx')) {
+            Http::macro('telnyx', function () {
+                $apiKey = config('texto.telnyx.api_key');
+                $timeout = (int) config('texto.telnyx.timeout', 30);
+                $client = Http::withToken($apiKey)->timeout($timeout)->acceptJson()->asJson();
+
+                return $client->baseUrl('https://api.telnyx.com/v2/');
             });
         }
         // Auto-schedule the status polling job so users do NOT need to add it manually to Console\Kernel.
