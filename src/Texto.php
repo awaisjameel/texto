@@ -64,15 +64,7 @@ class Texto
         $media = $options['media_urls'] ?? [];
         $metadata = $options['metadata'] ?? [];
 
-        return $this->withDriverConfigOverride($driverName, is_array($driverConfigOverride) ? $driverConfigOverride : null, function () use (
-            $driverName,
-            $options,
-            $toNumber,
-            $fromNumber,
-            $body,
-            $media,
-            $metadata
-        ) {
+        return $this->withDriverConfigOverride($driverName, is_array($driverConfigOverride) ? $driverConfigOverride : null, function () use ($driverName, $options, $toNumber, $fromNumber, $body, $media, $metadata) {
             $sender = $driverName
                 ? $this->driverManager->sender(Driver::from($driverName))
                 : $this->driverManager->sender();
@@ -96,7 +88,9 @@ class Texto
                     $record = $this->messages->storeSent($queuedResult);
                 }
                 // Dispatch with the exact queued message id (0 if not stored so upgrade falls back later)
-                Bus::dispatch(new SendMessageJob($record?->id ?? 0, $toNumber->e164, $body, [
+                /** @var \Awaisjameel\Texto\Models\Message|null $record */
+                $queuedId = $record ? (int) $record->id : 0; // concrete model has id
+                Bus::dispatch(new SendMessageJob($queuedId, $toNumber->e164, $body, [
                     'from' => $fromNumber?->e164,
                     'media_urls' => $media,
                     'metadata' => $metadata,
@@ -141,7 +135,7 @@ class Texto
             if (config('texto.store_messages', true)) {
                 if (! empty($options['queued_job'])) {
                     $queuedMessageId = $options['queued_message_id'] ?? null;
-                    if ($queuedMessageId && method_exists($this->messages, 'upgradeQueued')) {
+                    if ($queuedMessageId) {
                         $upgraded = $this->messages->upgradeQueued((int) $queuedMessageId, $result);
                         if (! $upgraded) {
                             // If deterministic upgrade fails (row missing or already terminal) create new record for audit trail.

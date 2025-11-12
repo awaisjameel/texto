@@ -15,7 +15,12 @@ use Illuminate\Support\Facades\Log;
 
 class TwilioConversationsApi implements TwilioConversationsApiInterface
 {
-    public function __construct(protected string $accountSid, protected string $authToken) {}
+    public function __construct(protected string $accountSid, protected string $authToken)
+    {
+        if ($accountSid === '' || $authToken === '') {
+            throw new \InvalidArgumentException('TwilioConversationsApi requires non-empty credentials.');
+        }
+    }
 
     public function createConversation(string $friendlyName, array $params = []): array
     {

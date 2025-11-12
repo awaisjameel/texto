@@ -15,7 +15,12 @@ use Illuminate\Support\Facades\Log;
 
 class TwilioMessagingApi implements TwilioMessagingApiInterface
 {
-    public function __construct(protected string $accountSid, protected string $authToken) {}
+    public function __construct(protected string $accountSid, protected string $authToken)
+    {
+        if ($accountSid === '' || $authToken === '') {
+            throw new \InvalidArgumentException('TwilioMessagingApi requires non-empty credentials.');
+        }
+    }
 
     public function sendMessage(string $to, string $from, ?string $body, array $mediaUrls = [], array $options = []): array
     {
@@ -36,7 +41,6 @@ class TwilioMessagingApi implements TwilioMessagingApiInterface
         }
 
         $response = Http::twilio('messaging')
-            ->withBasicAuth($this->accountSid, $this->authToken) // macro already sets but explicit for clarity
             ->withBody($form, 'application/x-www-form-urlencoded')
             ->post($endpoint);
 
