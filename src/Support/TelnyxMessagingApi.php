@@ -15,9 +15,7 @@ use Illuminate\Support\Facades\Log;
 
 class TelnyxMessagingApi implements TelnyxMessagingApiInterface
 {
-    public function __construct(protected string $apiKey)
-    {
-    }
+    public function __construct(protected string $apiKey) {}
 
     public function sendMessage(string $to, string $from, string $body, array $mediaUrls = [], array $options = []): array
     {
@@ -33,12 +31,14 @@ class TelnyxMessagingApi implements TelnyxMessagingApiInterface
             $payload['media_urls'] = $mediaUrls;
         }
         $resp = Http::telnyx()->post('messages', $payload);
+
         return $this->handle($resp, 'sendMessage', ['to' => $to]);
     }
 
     public function fetchMessage(string $messageId): array
     {
-        $resp = Http::telnyx()->get('messages/' . $messageId);
+        $resp = Http::telnyx()->get('messages/'.$messageId);
+
         return $this->handle($resp, 'fetchMessage', ['id' => $messageId]);
     }
 
@@ -47,6 +47,7 @@ class TelnyxMessagingApi implements TelnyxMessagingApiInterface
         if ($response->successful()) {
             $json = $response->json();
             $data = is_array($json) ? ($json['data'] ?? $json) : [];
+
             return is_array($data) ? $data : [];
         }
         $status = $response->status();

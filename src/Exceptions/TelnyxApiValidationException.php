@@ -4,6 +4,4 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto\Exceptions;
 
-class TelnyxApiValidationException extends TelnyxApiException
-{
-}
+class TelnyxApiValidationException extends TelnyxApiException {}

@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use Awaisjameel\Texto\Support\TelnyxMessagingApi;
 use Awaisjameel\Texto\Exceptions\TelnyxApiAuthException;
+use Awaisjameel\Texto\Support\TelnyxMessagingApi;
 use Illuminate\Support\Facades\Http;
 
 it('sends a Telnyx message successfully', function () {

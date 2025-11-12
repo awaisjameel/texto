@@ -66,6 +66,7 @@ class TextoServiceProvider extends PackageServiceProvider
         // Telnyx Messaging adapter binding (only when API key present)
         $this->app->singleton(\Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface::class, function () {
             $apiKey = config('texto.telnyx.api_key');
+
             return new \Awaisjameel\Texto\Support\TelnyxMessagingApi($apiKey);
         });
 
@@ -116,11 +117,12 @@ class TextoServiceProvider extends PackageServiceProvider
             });
         }
         // Telnyx macro similar style to Twilio to provide unified PendingRequest builder
-        if (!Http::hasMacro('telnyx')) {
+        if (! Http::hasMacro('telnyx')) {
             Http::macro('telnyx', function () {
                 $apiKey = config('texto.telnyx.api_key');
                 $timeout = (int) config('texto.telnyx.timeout', 30);
                 $client = Http::withToken($apiKey)->timeout($timeout)->acceptJson()->asJson();
+
                 return $client->baseUrl('https://api.telnyx.com/v2/');
             });
         }

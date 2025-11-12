@@ -6,13 +6,13 @@ namespace Awaisjameel\Texto\Drivers;
 
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
 use Awaisjameel\Texto\Contracts\PollableMessageSenderInterface;
+use Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface;
 use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
+use Awaisjameel\Texto\Exceptions\TelnyxApiException;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Support\Retry;
 use Awaisjameel\Texto\Support\StatusMapper;
-use Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface;
-use Awaisjameel\Texto\Exceptions\TelnyxApiException;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Illuminate\Support\Facades\Log;
@@ -24,7 +24,7 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
     public function __construct(protected array $config, ?TelnyxMessagingApiInterface $messagingApi = null)
     {
         $apiKey = $this->config['api_key'] ?? null;
-        if (!$apiKey) {
+        if (! $apiKey) {
             throw new TextoSendFailedException('Telnyx API key missing.');
         }
         $this->messagingApi = $messagingApi ?? (app()->bound(TelnyxMessagingApiInterface::class)
@@ -39,7 +39,7 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
     {
         $fromNumber = $from?->e164 ?? ($this->config['from_number'] ?? null);
         $profileId = $this->config['messaging_profile_id'] ?? null;
-        if (!$fromNumber || !$profileId) {
+        if (! $fromNumber || ! $profileId) {
             throw new TextoSendFailedException('Telnyx from number or messaging_profile_id not configured.');
         }
 
@@ -50,7 +50,7 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
             'text' => $body,
             'messaging_profile_id' => $profileId,
         ];
-        if (!empty($mediaUrls)) {
+        if (! empty($mediaUrls)) {
             $payload['media_urls'] = $mediaUrls;
         }
         if ($webhookUrl) {
@@ -60,14 +60,15 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
         try {
             $data = Retry::exponential(function () use ($to, $fromNumber, $body, $mediaUrls, $profileId, $webhookUrl) {
                 $options = ['messaging_profile_id' => $profileId] + ($webhookUrl ? ['webhook_url' => $webhookUrl] : []);
+
                 return $this->messagingApi->sendMessage($to->e164, $fromNumber, $body, $mediaUrls, $options);
             }, (int) config('texto.retry.max_attempts', 3), (int) config('texto.retry.backoff_start_ms', 200));
         } catch (TelnyxApiException $e) {
             Log::error('Texto Telnyx API send failed', ['error' => $e->getMessage(), 'status' => $e->status, 'code' => $e->telnyxCode, 'context' => $e->context]);
-            throw new TextoSendFailedException('Telnyx API send failed: ' . $e->getMessage(), 0, $e);
+            throw new TextoSendFailedException('Telnyx API send failed: '.$e->getMessage(), 0, $e);
         } catch (\Throwable $e) {
             Log::error('Texto Telnyx send failed', ['error' => $e->getMessage()]);
-            throw new TextoSendFailedException('Telnyx send failed: ' . $e->getMessage(), 0, $e);
+            throw new TextoSendFailedException('Telnyx send failed: '.$e->getMessage(), 0, $e);
         }
 
         $data = $this->extractData($data ?? null);
@@ -95,7 +96,7 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
             'telnyx_parts' => $parts,
             'telnyx_cost_amount' => $costAmount,
             'telnyx_cost_currency' => $costCurrency,
-        ], fn($v) => $v !== null);
+        ], fn ($v) => $v !== null);
 
         $result = new SentMessageResult(
             Driver::Telnyx,
@@ -128,18 +129,20 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
             $data = $this->messagingApi->fetchMessage($providerMessageId);
         } catch (TelnyxApiException $e) {
             Log::warning('Telnyx fetchStatus API error', ['id' => $providerMessageId, 'error' => $e->getMessage(), 'status' => $e->status]);
+
             return null;
         } catch (\Throwable $e) {
             Log::warning('Telnyx fetchStatus failed', ['id' => $providerMessageId, 'error' => $e->getMessage()]);
+
             return null;
         }
 
         $data = $this->extractData($data);
-        if (!$data) {
+        if (! $data) {
             return null;
         }
         $raw = $this->extractRecipientStatus($data['to'] ?? null);
-        if (!$raw) {
+        if (! $raw) {
             return null;
         }
 
@@ -164,7 +167,7 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
     private function extractRecipientStatus(mixed $recipients): ?string
     {
         $entries = $this->extractData($recipients);
-        if (!$entries) {
+        if (! $entries) {
             return null;
         }
 
