@@ -1,5 +1,33 @@
 ### Key Points
 
+> Adapter Architecture Update (Texto vNext): Telnyx integration now mirrors the Twilio refactor – all REST calls flow through the `TelnyxMessagingApiInterface` adapter resolved from the container. The `TelnyxSender` composes this adapter, extracts normalized status/cost metadata, and applies unified retry/backoff + exception mapping. HTTP calls use the `Http::telnyx()` macro defined in `TextoServiceProvider`, providing a preconfigured base URL, token auth, JSON headers, and timeout. Errors map to typed exceptions: `TelnyxApiAuthException`, `TelnyxApiRateLimitException`, `TelnyxApiValidationException`, `TelnyxApiNotFoundException`, falling back to `TelnyxApiException`.
+
+#### Quick Usage
+
+```php
+// Resolve sender (package auto-selects Telnyx via config('texto.driver') === 'telnyx')
+$result = \Texto::send('+15551230000', 'Hello world');
+
+// Adapter direct (advanced scenarios)
+$api = app(\Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface::class);
+$data = $api->sendMessage('+15551230000', '+15557778888', 'Hello', [], [
+    'messaging_profile_id' => config('texto.telnyx.messaging_profile_id'),
+    'webhook_url' => 'https://example.com/webhooks/telnyx',
+]);
+```
+
+#### Exception Mapping
+
+| HTTP    | Exception                    | Notes                              |
+| ------- | ---------------------------- | ---------------------------------- |
+| 401/403 | TelnyxApiAuthException       | Bad / missing API key              |
+| 404     | TelnyxApiNotFoundException   | Resource not found                 |
+| 429     | TelnyxApiRateLimitException  | Rate limiting – retry with backoff |
+| 400/422 | TelnyxApiValidationException | Payload / parameter issues         |
+| Other   | TelnyxApiException           | Generic fallback                   |
+
+Retry logic leverages the shared `Retry::exponential` utility (configured via `texto.retry.*`).
+
 -   **Telnyx Messaging API Overview**: Telnyx provides a robust RESTful API for sending and receiving SMS/MMS messages globally, with support for delivery status notifications via webhooks. All interactions use HTTPS POST/GET requests to `https://api.telnyx.com/v2/` endpoints, authenticated via Bearer tokens. Research indicates high reliability for US/Canada numbers, though international support varies by carrier compliance.
 -   **Sending SMS/MMS**: Use the `/messages` endpoint to send texts or media-rich messages. SMS is straightforward with `text` parameter; MMS requires `media_urls` array of public HTTPS links (e.g., from S3). Costs are per-segment (~160 chars for GSM-7), typically $0.005 USD outbound.
 -   **Webhooks for Events**: Real-time notifications for inbound messages (`message.received`) and delivery statuses (`message.finalized`). Configure via Messaging Profiles in the portal or per-request. Signatures use ED25519 for security—always verify to prevent spoofing.
