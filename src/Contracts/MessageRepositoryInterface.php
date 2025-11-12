@@ -6,15 +6,14 @@ namespace Awaisjameel\Texto\Contracts;
 
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
-use Illuminate\Database\Eloquent\Model;
 
 interface MessageRepositoryInterface
 {
-    public function storeSent(SentMessageResult $result): Model;
+    public function storeSent(SentMessageResult $result): \Awaisjameel\Texto\Models\Message;
 
-    public function storeInbound(WebhookProcessingResult $result): Model;
+    public function storeInbound(WebhookProcessingResult $result): \Awaisjameel\Texto\Models\Message;
 
-    public function storeStatus(WebhookProcessingResult $result): ?Model;
+    public function storeStatus(WebhookProcessingResult $result): ?\Awaisjameel\Texto\Models\Message;
 
     /**
      * Update status via polling fallback.
@@ -29,5 +28,5 @@ interface MessageRepositoryInterface
      * @param  int  $id  Message ID
      * @param  SentMessageResult  $result  Updated result
      */
-    public function upgradeQueued(int $id, SentMessageResult $result): ?Model;
+    public function upgradeQueued(int $id, SentMessageResult $result): ?\Awaisjameel\Texto\Models\Message;
 }

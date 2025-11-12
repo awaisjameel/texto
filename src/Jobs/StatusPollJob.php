@@ -12,7 +12,7 @@ use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Models\Message;
 use Awaisjameel\Texto\Support\PollingParameterResolver;
 use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue; // kept optional; job scheduled directly
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Support\Facades\Log;
 
@@ -208,7 +208,7 @@ class StatusPollJob implements ShouldQueue
                 MessageStatus::Received->value => 4,
             ];
 
-            $progression = $rank[$newStatus->value] > ($rank[$current->value] ?? 0);
+            $progression = $rank[$newStatus->value] > $rank[$current->value];
             $statusToStore = $terminal
                 ? $newStatus // Always persist terminal
                 : ($progression ? $newStatus : $current); // Promote if progressed

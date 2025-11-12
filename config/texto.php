@@ -11,12 +11,18 @@ return [
         'backoff_start_ms' => env('TEXTO_RETRY_BACKOFF_START', 200),
     ],
     'twilio' => [
+        'base_urls' => [
+            'messaging' => 'https://api.twilio.com/2010-04-01',
+            'conversations' => 'https://conversations.twilio.com/v1',
+            'content' => 'https://content.twilio.com/v1',
+        ],
         'account_sid' => env('TWILIO_ACCOUNT_SID'),
         'auth_token' => env('TWILIO_AUTH_TOKEN'),
         'from_number' => env('TWILIO_FROM_NUMBER'),
-        // Enable the Twilio Conversations + Content Template sending flow
-        'use_conversations' => env('TWILIO_USE_CONVERSATIONS', true),
-        // Friendly names for auto-managed templates (used if SIDs not explicitly supplied)
+        'use_conversations' => env('TWILIO_USE_CONVERSATIONS', false),
+        'timeout' => env('TWILIO_HTTP_TIMEOUT', 30),
+
+        // Optional explicit template
         'sms_template_friendly_name' => env('TWILIO_SMS_TEMPLATE_FRIENDLY_NAME', 'texto_sms_template'),
         'mms_template_friendly_name' => env('TWILIO_MMS_TEMPLATE_FRIENDLY_NAME', 'texto_mms_template'),
         // Optional explicit template SIDs (skip auto discovery/creation if provided)
@@ -28,6 +34,7 @@ return [
         'conversation_webhook_url' => env('TWILIO_CONVERSATION_WEBHOOK_URL'),
     ],
     'telnyx' => [
+        'base_url' => env('TELNYX_BASE_URL', 'https://api.telnyx.com/v2/'),
         'api_key' => env('TELNYX_API_KEY'),
         'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
         'from_number' => env('TELNYX_FROM_NUMBER'),

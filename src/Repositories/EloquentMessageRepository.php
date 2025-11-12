@@ -9,12 +9,11 @@ use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Models\Message;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Log;
 
 class EloquentMessageRepository implements MessageRepositoryInterface
 {
-    public function storeSent(SentMessageResult $result): Model
+    public function storeSent(SentMessageResult $result): Message
     {
         // Extract optional analytical fields from metadata (currently Telnyx-specific)
         $segments = $result->metadata['telnyx_parts'] ?? null;
@@ -50,7 +49,7 @@ class EloquentMessageRepository implements MessageRepositoryInterface
         return $record;
     }
 
-    public function storeInbound(WebhookProcessingResult $result): Model
+    public function storeInbound(WebhookProcessingResult $result): Message
     {
         $record = Message::create([
             'direction' => $result->direction->value,
@@ -59,7 +58,7 @@ class EloquentMessageRepository implements MessageRepositoryInterface
             'to_number' => $result->to?->e164,
             'body' => $result->body,
             'media_urls' => $result->mediaUrls,
-            'status' => $result->status?->value ?? MessageStatus::Received->value,
+            'status' => ($result->status ? $result->status->value : MessageStatus::Received->value),
             'provider_message_id' => $result->providerMessageId,
             'metadata' => $result->metadata,
             'received_at' => now(),
@@ -69,7 +68,7 @@ class EloquentMessageRepository implements MessageRepositoryInterface
         return $record;
     }
 
-    public function storeStatus(WebhookProcessingResult $result): ?Model
+    public function storeStatus(WebhookProcessingResult $result): ?Message
     {
         if (! $result->providerMessageId) {
             return null;
@@ -79,7 +78,7 @@ class EloquentMessageRepository implements MessageRepositoryInterface
             return null;
         }
         $previousStatus = $message->status;
-        $message->status = $result->status?->value ?? $message->status;
+        $message->status = $result->status ? $result->status->value : $message->status;
         // Merge metadata (status webhook may include additional event info)
         $mergedMetadata = array_merge($message->metadata ?? [], $result->metadata ?? []);
         $message->metadata = $mergedMetadata;
@@ -102,7 +101,10 @@ class EloquentMessageRepository implements MessageRepositoryInterface
         $previousStatus = $message->status;
         $message->status = $status->value;
         $meta = $message->metadata ?? [];
-        $meta['poll_attempts'] = ($meta['poll_attempts'] ?? 0) + 1;
+        if (! isset($meta['poll_attempts'])) {
+            $meta['poll_attempts'] = 0;
+        }
+        $meta['poll_attempts']++;
         $meta['last_poll_at'] = now()->toIso8601String();
         foreach ($extraMetadata as $k => $v) {
             $meta[$k] = $v;
@@ -114,7 +116,7 @@ class EloquentMessageRepository implements MessageRepositoryInterface
             'id' => $message->id,
             'status' => $message->status,
             'previous' => $previousStatus,
-            'poll_attempts' => $meta['poll_attempts'] ?? null,
+            'poll_attempts' => $meta['poll_attempts'],
         ]);
 
         return $message;
@@ -123,7 +125,7 @@ class EloquentMessageRepository implements MessageRepositoryInterface
     /**
      * Upgrade a specific queued message by its primary key. This removes ambiguity when multiple queued rows share identical body/to/driver.
      */
-    public function upgradeQueued(int $id, SentMessageResult $result): ?Model
+    public function upgradeQueued(int $id, SentMessageResult $result): ?Message
     {
         $message = Message::find($id);
         if (! $message) {

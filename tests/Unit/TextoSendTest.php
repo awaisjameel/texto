@@ -10,7 +10,11 @@ use Awaisjameel\Texto\Texto;
 use Illuminate\Support\Facades\Bus;
 
 it('stores a sent message using fake driver', function () {
+    // Use twilio driver but supply dummy credentials to avoid constructor exceptions if fallback happens.
     config()->set('texto.driver', 'twilio');
+    config()->set('texto.twilio.account_sid', 'ACXXXX');
+    config()->set('texto.twilio.auth_token', 'token');
+    config()->set('texto.twilio.from_number', '+15551112222');
     /** @var DriverManagerInterface $manager */
     $manager = app(DriverManagerInterface::class);
     $manager->extend('twilio', fn () => new FakeSender);
@@ -24,6 +28,10 @@ it('stores a sent message using fake driver', function () {
     $record = Message::first();
     expect($record->body)->toBe('Hello world');
     expect($record->direction)->toBe('sent');
+    // reset overrides
+    config()->set('texto.twilio.account_sid', null);
+    config()->set('texto.twilio.auth_token', null);
+    config()->set('texto.twilio.from_number', null);
 });
 
 it('captures driver config snapshot when queueing sends', function () {

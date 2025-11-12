@@ -12,7 +12,6 @@ use Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface;
 use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
-// Deprecated SDK-based content service import removed; using HTTP adapter
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Exceptions\TwilioApiException;
 use Awaisjameel\Texto\Support\Retry;
@@ -68,7 +67,7 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
     public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
     {
 
-        $fromNumber = $from?->e164 ?? ($this->config['from_number'] ?? null);
+        $fromNumber = $from ? $from->e164 : ($this->config['from_number'] ?? null);
         if (! $fromNumber) {
             throw new TextoSendFailedException('Twilio from number not configured.');
         }
@@ -299,7 +298,8 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
             'types' => [
                 'twilio/media' => [
                     'body' => '{{message_body_1}}{{message_body_2}}{{message_body_3}}{{message_body_4}}{{message_body_5}}',
-                    'media' => [env('APP_URL').'/{{media_path}}'],
+                    // Use config('app.url') instead of env() for cache compatibility
+                    'media' => [rtrim((string) config('app.url'), '/').'/{{media_path}}'],
                 ],
             ],
         ];
@@ -402,7 +402,7 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
      * for status lookup since the classic Messages API may not return the message SID.
      *
      * @param  string  $providerMessageId  The Twilio Message SID
-     * @param  string|null  $conversationSid  Optional Conversation SID for conversation messages
+     * @param  mixed  ...$context  Optional extra context (e.g. conversation SID)
      * @return MessageStatus|null The current message status or null if not found
      */
     public function fetchStatus(string $providerMessageId, mixed ...$context): ?MessageStatus

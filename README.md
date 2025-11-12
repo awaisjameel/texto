@@ -557,9 +557,9 @@ Table: `texto_messages`
 
 Auto‑registered routes (POST):
 
-| Purpose | Twilio                                  | Telnyx                         |
-| ------- | --------------------------------------- | ------------------------------ |
-| Inbound | `/texto/webhook/twilio`                 | `/texto/webhook/telnyx`        |
+| Purpose | Twilio                                  | Telnyx                                  |
+| ------- | --------------------------------------- | --------------------------------------- |
+| Inbound | `/texto/webhook/twilio`                 | `/texto/webhook/telnyx`                 |
 | Status  | `/texto/webhook/twilio` (same endpoint) | `/texto/webhook/telnyx` (same endpoint) |
 
 Both providers now publish inbound and status callbacks to a **single endpoint**. Texto inspects each payload to determine whether it is an inbound message or a delivery status update, ensuring identical processing for Twilio and Telnyx.
@@ -620,6 +620,22 @@ When `TWILIO_USE_CONVERSATIONS=true`, Texto:
 Captured metadata includes: `conversation_sid`, `conversation_reused`, optional `conversation_webhook_sid`.
 
 Disable by setting `TWILIO_USE_CONVERSATIONS=false` to revert to classic Messages API.
+
+#### Credential‑Aware Binding (New)
+
+As of 1.1.0 the package only binds Twilio (and Telnyx) low‑level API adapter singletons when their required credentials are present at boot time. This prevents accidental
+TypeErrors in test environments where env vars are intentionally omitted. If you rely on resolving (e.g.) `TwilioMessagingApiInterface` from the container in tests,
+ensure you either:
+
+1. Provide fake credentials via env (e.g. `TWILIO_ACCOUNT_SID=AC_TEST`, `TWILIO_AUTH_TOKEN=test`), or
+2. Manually bind a fake implementation in a test service provider.
+
+The HTTP macro `Http::twilio()` is also credential‑aware; it omits Basic Auth when credentials are missing so generic tests can stub endpoints without failures.
+
+#### Content Template Creation Robustness
+
+Template creation logic now tolerates varied (mock) response shapes and will parse a `sid` from either a direct field or nested content record arrays.
+No behavioral change is required for production usage; failures still fall back to body‑only send paths.
 
 ---
 
@@ -1375,9 +1391,9 @@ We welcome contributions! Areas of particular interest:
 
 ### Version Compatibility
 
-| Texto Version | Laravel Version | PHP Version | Status  |
-| ------------- | --------------- | ----------- | ------- |
-| 1.x           | 10.0 - 12.x     | 7.4 - 8.2   | Active  |
+| Texto Version | Laravel Version | PHP Version | Status |
+| ------------- | --------------- | ----------- | ------ |
+| 1.x           | 10.0 - 12.x     | 7.4 - 8.2   | Active |
 
 ### Migration Guide
 

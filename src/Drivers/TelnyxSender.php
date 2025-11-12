@@ -37,25 +37,13 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
      */
     public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
     {
-        $fromNumber = $from?->e164 ?? ($this->config['from_number'] ?? null);
+        $fromNumber = $from ? $from->e164 : ($this->config['from_number'] ?? null);
         $profileId = $this->config['messaging_profile_id'] ?? null;
         if (! $fromNumber || ! $profileId) {
             throw new TextoSendFailedException('Telnyx from number or messaging_profile_id not configured.');
         }
 
         $webhookUrl = $metadata['webhook_url'] ?? null;
-        $payload = [
-            'to' => $to->e164,
-            'from' => $fromNumber,
-            'text' => $body,
-            'messaging_profile_id' => $profileId,
-        ];
-        if (! empty($mediaUrls)) {
-            $payload['media_urls'] = $mediaUrls;
-        }
-        if ($webhookUrl) {
-            $payload['webhook_url'] = $webhookUrl;
-        }
 
         try {
             $data = Retry::exponential(function () use ($to, $fromNumber, $body, $mediaUrls, $profileId, $webhookUrl) {
@@ -71,7 +59,7 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
             throw new TextoSendFailedException('Telnyx send failed: '.$e->getMessage(), 0, $e);
         }
 
-        $data = $this->extractData($data ?? null);
+        $data = $this->extractData($data);
         $providerId = null;
         $telnyxStatusRaw = null;
         $parts = null;
@@ -175,14 +163,12 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
             return $entries['status'];
         }
 
-        $first = $entries[0] ?? null;
-        if ($first === null) {
-            return null;
-        }
-
-        $firstData = $this->extractData($first);
-        if ($firstData && isset($firstData['status']) && is_string($firstData['status'])) {
-            return $firstData['status'];
+        $first = array_values($entries)[0] ?? null;
+        if ($first !== null) {
+            $firstData = $this->extractData($first);
+            if ($firstData && isset($firstData['status']) && is_string($firstData['status'])) {
+                return $firstData['status'];
+            }
         }
 
         return null;

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto;
 
-use Awaisjameel\Texto\Commands\TextoCommand;
 use Awaisjameel\Texto\Commands\TextoInstallCommand;
 use Awaisjameel\Texto\Commands\TextoTestSendCommand;
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
@@ -13,6 +12,7 @@ use Awaisjameel\Texto\Contracts\MessageSenderInterface;
 use Awaisjameel\Texto\Repositories\EloquentMessageRepository;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 
@@ -20,55 +20,43 @@ class TextoServiceProvider extends PackageServiceProvider
 {
     public function configurePackage(Package $package): void
     {
-        /*
-         * This class is a Package Service Provider
-         *
-         * More info: https://github.com/spatie/laravel-package-tools
-         */
         $package
             ->name('texto')
             ->hasConfigFile()
-            // Additional Twilio-specific config separated for clarity in adapter migration
-            ->hasConfigFile('twilio')
             ->hasViews()
             ->hasMigration('create_texto_messages_table')
             ->hasRoute('web')
-            ->hasCommand(TextoCommand::class)
             ->hasCommand(TextoInstallCommand::class)
             ->hasCommand(TextoTestSendCommand::class);
     }
 
     public function packageRegistered(): void
     {
-        // Bind the driver manager singleton
+        // Bind the driver manager as a singleton so driver extensions applied during runtime (e.g. in tests)
         $this->app->singleton(DriverManagerInterface::class, function ($app) {
             return new DriverManager($app['config']);
         });
-        // Twilio API adapter bindings (only when credentials present)
-        $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface::class, function () {
-            return new \Awaisjameel\Texto\Support\TwilioMessagingApi(
-                config('twilio.account_sid'),
-                config('twilio.auth_token')
-            );
-        });
-        $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioConversationsApiInterface::class, function () {
-            return new \Awaisjameel\Texto\Support\TwilioConversationsApi(
-                config('twilio.account_sid'),
-                config('twilio.auth_token')
-            );
-        });
-        $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioContentApiInterface::class, function () {
-            return new \Awaisjameel\Texto\Support\TwilioContentApi(
-                config('twilio.account_sid'),
-                config('twilio.auth_token')
-            );
-        });
+        // Twilio API adapter bindings (only when credentials present). Skip binding to avoid test-time TypeErrors.
+        $twilioSid = config('texto.twilio.account_sid');
+        $twilioToken = config('texto.twilio.auth_token');
+        if ($twilioSid && $twilioToken) {
+            $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface::class, function () use ($twilioSid, $twilioToken) {
+                return new \Awaisjameel\Texto\Support\TwilioMessagingApi($twilioSid, $twilioToken);
+            });
+            $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioConversationsApiInterface::class, function () use ($twilioSid, $twilioToken) {
+                return new \Awaisjameel\Texto\Support\TwilioConversationsApi($twilioSid, $twilioToken);
+            });
+            $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioContentApiInterface::class, function () use ($twilioSid, $twilioToken) {
+                return new \Awaisjameel\Texto\Support\TwilioContentApi($twilioSid, $twilioToken);
+            });
+        }
         // Telnyx Messaging adapter binding (only when API key present)
-        $this->app->singleton(\Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface::class, function () {
-            $apiKey = config('texto.telnyx.api_key');
-
-            return new \Awaisjameel\Texto\Support\TelnyxMessagingApi($apiKey);
-        });
+        $telnyxKey = config('texto.telnyx.api_key');
+        if ($telnyxKey) {
+            $this->app->singleton(\Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface::class, function () use ($telnyxKey) {
+                return new \Awaisjameel\Texto\Support\TelnyxMessagingApi($telnyxKey);
+            });
+        }
 
         // Message repository binding
         $this->app->singleton(MessageRepositoryInterface::class, function ($app) {
@@ -84,7 +72,7 @@ class TextoServiceProvider extends PackageServiceProvider
         });
 
         // Facade root - inject dependencies
-        $this->app->singleton(Texto::class, function ($app) {
+        $this->app->bind(Texto::class, function ($app) {
             return new Texto(
                 $app->make(DriverManagerInterface::class),
                 $app->make(MessageRepositoryInterface::class)
@@ -97,13 +85,20 @@ class TextoServiceProvider extends PackageServiceProvider
         // Register Twilio HTTP macro for unified direct REST calls (messaging|conversations|content)
         if (! Http::hasMacro('twilio')) {
             Http::macro('twilio', function (string $api = 'messaging') {
-                $sid = config('twilio.account_sid');
-                $token = config('twilio.auth_token');
-                $base = config("twilio.base_urls.$api");
-                $timeout = (int) config('twilio.timeout', 15);
-                $client = Http::withBasicAuth($sid, $token)->timeout($timeout);
-                // Twilio REST APIs universally accept form-encoded params; use form for messaging + conversations.
-                // Content API accepts JSON (template creation/search); keep JSON for 'content'.
+                $base = config("texto.twilio.base_urls.$api");
+                $sid = config('texto.twilio.account_sid');
+                $token = config('texto.twilio.auth_token');
+                $timeout = (int) config('texto.twilio.timeout', 30);
+
+                // Start with a plain client; add auth only when both credentials are present.
+                $client = Http::timeout($timeout)
+                    ->connectTimeout($timeout);
+                if ($sid && $token) {
+                    $client = $client->withBasicAuth($sid, $token);
+                }
+
+                // Twilio REST APIs universally accept form-encoded params for messaging + conversations.
+                // Content API prefers JSON.
                 if ($api === 'content') {
                     $client = $client->acceptJson()->asJson();
                 } else {
@@ -113,21 +108,28 @@ class TextoServiceProvider extends PackageServiceProvider
                     $client = $client->baseUrl($base);
                 }
 
+                Log::info('Texto Twilio HTTP macro using base URL', ['api' => $api, 'base_url' => $base]);
+
                 return $client;
             });
         }
-        // Telnyx macro similar style to Twilio to provide unified PendingRequest builder
+        // Telnyx macro
         if (! Http::hasMacro('telnyx')) {
             Http::macro('telnyx', function () {
+                $base = config('texto.telnyx.base_url', 'https://api.telnyx.com/v2/');
                 $apiKey = config('texto.telnyx.api_key');
                 $timeout = (int) config('texto.telnyx.timeout', 30);
-                $client = Http::withToken($apiKey)->timeout($timeout)->acceptJson()->asJson();
 
-                return $client->baseUrl('https://api.telnyx.com/v2/');
+                $client = Http::withToken($apiKey)
+                    ->acceptJson()
+                    ->asJson()
+                    ->timeout($timeout)
+                    ->connectTimeout($timeout);
+
+                return $client->baseUrl($base);
             });
         }
         // Auto-schedule the status polling job so users do NOT need to add it manually to Console\Kernel.
-        // Controlled via config('texto.status_polling.enabled'). Disable there or via ENV if not desired.
         if (config('texto.status_polling.enabled')) {
             $this->app->booted(function () {
                 try {
