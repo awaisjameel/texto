@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Drivers\FakeSender;
+use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Jobs\SendMessageJob;
 use Awaisjameel\Texto\Models\Message;
 use Awaisjameel\Texto\Texto;
@@ -58,6 +59,31 @@ it('captures driver config snapshot when queueing sends', function () {
 
     config()->set('texto.queue', false);
     config()->set('texto.store_messages', true);
+});
+
+it('sends immediately when using sendDirect even if queue is enabled', function () {
+    Bus::fake();
+    config()->set('texto.queue', true);
+    config()->set('texto.driver', 'twilio');
+    config()->set('texto.twilio.account_sid', 'ACXXXX');
+    config()->set('texto.twilio.auth_token', 'token');
+    config()->set('texto.twilio.from_number', '+15551112222');
+    /** @var DriverManagerInterface $manager */
+    $manager = app(DriverManagerInterface::class);
+    $manager->extend('twilio', fn () => new FakeSender);
+
+    /** @var Texto $texto */
+    $texto = app(Texto::class);
+    $result = $texto->sendDirect('+12345678901', 'Immediate send');
+
+    Bus::assertNotDispatched(SendMessageJob::class);
+    expect($result->status)->toBe(MessageStatus::Sent);
+    expect(Message::query()->count())->toBe(1);
+
+    config()->set('texto.queue', false);
+    config()->set('texto.twilio.account_sid', null);
+    config()->set('texto.twilio.auth_token', null);
+    config()->set('texto.twilio.from_number', null);
 });
 
 it('applies driver config overrides during send lifecycle', function () {

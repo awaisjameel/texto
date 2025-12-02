@@ -38,6 +38,28 @@ class Texto
      */
     public function send(string $to, string $body, array $options = []): SentMessageResult
     {
+        return $this->performSend($to, $body, $options, false);
+    }
+
+    /**
+     * Send an SMS/MMS message immediately, bypassing the queue even if enabled.
+     *
+     * @param  string  $to  Recipient phone number (E.164 format or local format)
+     * @param  string  $body  Message body text
+     * @param  array{media_urls?:string[], metadata?:array, from?:string, driver?:string, driver_config?:array<string,mixed>, queued_job?:bool, queued_message_id?:int}  $options
+     *
+     * @throws TextoSendFailedException
+     */
+    public function sendDirect(string $to, string $body, array $options = []): SentMessageResult
+    {
+        return $this->performSend($to, $body, $options, true);
+    }
+
+    /**
+     * @param  array{media_urls?:string[], metadata?:array, from?:string, driver?:string, driver_config?:array<string,mixed>, queued_job?:bool, queued_message_id?:int}  $options
+     */
+    private function performSend(string $to, string $body, array $options, bool $forceSynchronous): SentMessageResult
+    {
         $driverName = Arr::get($options, 'driver');
         $driverConfigOverride = Arr::get($options, 'driver_config');
 
@@ -64,13 +86,13 @@ class Texto
         $media = $options['media_urls'] ?? [];
         $metadata = $options['metadata'] ?? [];
 
-        return $this->withDriverConfigOverride($driverName, is_array($driverConfigOverride) ? $driverConfigOverride : null, function () use ($driverName, $options, $toNumber, $fromNumber, $body, $media, $metadata) {
+        return $this->withDriverConfigOverride($driverName, is_array($driverConfigOverride) ? $driverConfigOverride : null, function () use ($driverName, $options, $toNumber, $fromNumber, $body, $media, $metadata, $forceSynchronous) {
             $sender = $driverName
                 ? $this->driverManager->sender(Driver::from($driverName))
                 : $this->driverManager->sender();
 
             // Queue mode: create queued result, persist, dispatch job (only on initial call, not inside queued job)
-            if (config('texto.queue', false) && empty($options['queued_job'])) {
+            if (! $forceSynchronous && config('texto.queue', false) && empty($options['queued_job'])) {
                 $currentDriver = $driverName ?: config('texto.driver', 'twilio');
                 $queuedResult = new SentMessageResult(
                     Driver::from($currentDriver),
