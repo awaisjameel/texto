@@ -57,7 +57,6 @@ it('promotes queued to sent on polling when provider returns sent', function () 
         'metadata' => ['poll_attempts' => 0, 'last_poll_at' => null],
     ]);
 
-    // Run poll job
     $job = new StatusPollJob;
     $job->handle(app(MessageRepositoryInterface::class), app(DriverManagerInterface::class));
 

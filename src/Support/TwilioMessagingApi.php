@@ -30,11 +30,10 @@ class TwilioMessagingApi implements TwilioMessagingApiInterface
             'From' => $from,
         ] + ($body !== null ? ['Body' => $body] : []);
         foreach ($options as $k => $v) {
-            // Allow passing already correct Twilio param names (e.g. StatusCallback)
             $payload[$k] = $v;
         }
 
-        // Build form body manually to support repeated MediaUrl keys
+        // Built manually rather than via Http::asForm so MediaUrl can repeat across media items.
         $form = http_build_query($payload, '', '&', PHP_QUERY_RFC3986);
         foreach ($mediaUrls as $m) {
             $form .= '&'.'MediaUrl='.rawurlencode($m);
@@ -50,7 +49,7 @@ class TwilioMessagingApi implements TwilioMessagingApiInterface
 
         $this->throwForResponse($response, 'sendMessage');
 
-        return []; // unreachable
+        return [];
     }
 
     public function fetchMessage(string $messageSid): array
@@ -69,7 +68,7 @@ class TwilioMessagingApi implements TwilioMessagingApiInterface
     {
         $status = $response->status();
         $body = $response->json() ?? [];
-        $code = $body['code'] ?? null; // Twilio error code
+        $code = $body['code'] ?? null;
         $message = $body['message'] ?? ($body['detail'] ?? 'Twilio API error');
         $exContext = $ctx + ['status' => $status, 'twilio_code' => $code, 'action' => $action, 'body' => $body];
         Log::warning('Twilio Messaging API error', $exContext);

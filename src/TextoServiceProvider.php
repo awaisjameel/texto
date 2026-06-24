@@ -9,7 +9,16 @@ use Awaisjameel\Texto\Commands\TextoTestSendCommand;
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
+use Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface;
+use Awaisjameel\Texto\Contracts\TwilioContentApiInterface;
+use Awaisjameel\Texto\Contracts\TwilioConversationsApiInterface;
+use Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface;
+use Awaisjameel\Texto\Jobs\StatusPollJob;
 use Awaisjameel\Texto\Repositories\EloquentMessageRepository;
+use Awaisjameel\Texto\Support\TelnyxMessagingApi;
+use Awaisjameel\Texto\Support\TwilioContentApi;
+use Awaisjameel\Texto\Support\TwilioConversationsApi;
+use Awaisjameel\Texto\Support\TwilioMessagingApi;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -33,37 +42,34 @@ class TextoServiceProvider extends PackageServiceProvider
     public function packageRegistered(): void
     {
         // Bind the driver manager as a singleton so driver extensions applied during runtime (e.g. in tests)
-        $this->app->singleton(DriverManagerInterface::class, function ($app) {
-            return new DriverManager($app['config']);
-        });
+        // persist. Binding the class directly (instead of a closure resolving $app['config']) lets the
+        // container inject the ConfigRepository by type-hint and keeps the binding Octane-safe.
+        $this->app->singleton(DriverManagerInterface::class, DriverManager::class);
         // Twilio API adapter bindings (only when credentials present). Skip binding to avoid test-time TypeErrors.
         $twilioSid = config('texto.twilio.account_sid');
         $twilioToken = config('texto.twilio.auth_token');
         if ($twilioSid && $twilioToken) {
-            $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface::class, function () use ($twilioSid, $twilioToken) {
-                return new \Awaisjameel\Texto\Support\TwilioMessagingApi($twilioSid, $twilioToken);
+            $this->app->singleton(TwilioMessagingApiInterface::class, function () use ($twilioSid, $twilioToken) {
+                return new TwilioMessagingApi($twilioSid, $twilioToken);
             });
-            $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioConversationsApiInterface::class, function () use ($twilioSid, $twilioToken) {
-                return new \Awaisjameel\Texto\Support\TwilioConversationsApi($twilioSid, $twilioToken);
+            $this->app->singleton(TwilioConversationsApiInterface::class, function () use ($twilioSid, $twilioToken) {
+                return new TwilioConversationsApi($twilioSid, $twilioToken);
             });
-            $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioContentApiInterface::class, function () use ($twilioSid, $twilioToken) {
-                return new \Awaisjameel\Texto\Support\TwilioContentApi($twilioSid, $twilioToken);
+            $this->app->singleton(TwilioContentApiInterface::class, function () use ($twilioSid, $twilioToken) {
+                return new TwilioContentApi($twilioSid, $twilioToken);
             });
         }
-        // Telnyx Messaging adapter binding (only when API key present)
         $telnyxKey = config('texto.telnyx.api_key');
         if ($telnyxKey) {
-            $this->app->singleton(\Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface::class, function () use ($telnyxKey) {
-                return new \Awaisjameel\Texto\Support\TelnyxMessagingApi($telnyxKey);
+            $this->app->singleton(TelnyxMessagingApiInterface::class, function () use ($telnyxKey) {
+                return new TelnyxMessagingApi($telnyxKey);
             });
         }
 
-        // Message repository binding
         $this->app->singleton(MessageRepositoryInterface::class, function ($app) {
             return new EloquentMessageRepository;
         });
 
-        // Sender resolves from active driver
         $this->app->bind(MessageSenderInterface::class, function ($app) {
             /** @var DriverManagerInterface $manager */
             $manager = $app->make(DriverManagerInterface::class);
@@ -71,7 +77,6 @@ class TextoServiceProvider extends PackageServiceProvider
             return $manager->sender();
         });
 
-        // Facade root - inject dependencies
         $this->app->bind(Texto::class, function ($app) {
             return new Texto(
                 $app->make(DriverManagerInterface::class),
@@ -90,7 +95,6 @@ class TextoServiceProvider extends PackageServiceProvider
                 $token = config('texto.twilio.auth_token');
                 $timeout = (int) config('texto.twilio.timeout', 30);
 
-                // Start with a plain client; add auth only when both credentials are present.
                 $client = Http::timeout($timeout)
                     ->connectTimeout($timeout);
                 if ($sid && $token) {
@@ -113,7 +117,6 @@ class TextoServiceProvider extends PackageServiceProvider
                 return $client;
             });
         }
-        // Telnyx macro
         if (! Http::hasMacro('telnyx')) {
             Http::macro('telnyx', function () {
                 $base = config('texto.telnyx.base_url', 'https://api.telnyx.com/v2/');
@@ -135,9 +138,10 @@ class TextoServiceProvider extends PackageServiceProvider
                 try {
                     $schedule = $this->app->make(Schedule::class);
                     // Using class reference lets Laravel construct the job cleanly and apply queue options.
-                    $schedule->job(\Awaisjameel\Texto\Jobs\StatusPollJob::class)
+                    $schedule->job(StatusPollJob::class)
                         ->everyMinute()
-                        ->name('texto-status-poll');
+                        ->name('texto-status-poll')
+                        ->withoutOverlapping(); // a run longer than a minute must not double-poll
                 } catch (\Throwable $e) {
                     // Silently ignore if scheduler not available (e.g., during tests without scheduling)
                 }

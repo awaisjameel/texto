@@ -7,6 +7,10 @@ parameters:
         - src
         - config
         - database
+    # This package ships its own config file, so env() is legitimate there. Point larastan's
+    # env-call rule at it (config_path() resolves to the host/testbench app, not the package).
+    configDirectories:
+        - config
     tmpDir: build/phpstan
     checkOctaneCompatibility: true
     checkModelProperties: true

@@ -1,5 +1,6 @@
 <?php
 
+use Awaisjameel\Texto\Exceptions\TwilioApiValidationException;
 use Awaisjameel\Texto\Support\TwilioMessagingApi;
 use Illuminate\Support\Facades\Http;
 
@@ -26,4 +27,4 @@ it('handles error response', function () {
     ]);
     $api = new TwilioMessagingApi('ACXXXX', 'token');
     $api->sendMessage('+15551234567', '+15550001111', 'Hi');
-})->throws(\Awaisjameel\Texto\Exceptions\TwilioApiValidationException::class);
+})->throws(TwilioApiValidationException::class);

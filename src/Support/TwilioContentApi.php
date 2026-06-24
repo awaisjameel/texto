@@ -44,7 +44,7 @@ class TwilioContentApi implements TwilioContentApiInterface
 
     public function createTemplate(array $definition): string
     {
-        $snake = $definition; // expecting snake_case keys already
+        $snake = $definition;
         $title = $this->convertPayloadToTitleCase($definition);
         $attempts = [
             ['variant' => 'snake_case', 'body' => $snake],
@@ -59,11 +59,10 @@ class TwilioContentApi implements TwilioContentApiInterface
                 continue;
             }
             if ($response->successful()) {
-                // Some Twilio-like mocks may return { sid: ..., friendly_name: ... } nested (test returns flat). Extract robustly.
                 $payload = $response->json();
                 $sid = $payload['sid'] ?? $response->json('sid');
                 if (! $sid) {
-                    // Support sequence mocks accidentally returning the search structure (contents => [...]) instead of create response.
+                    // Fall back to the search-style payload shape ({ contents: [...] }).
                     $records = $payload['contents'] ?? [];
                     if (is_array($records)) {
                         foreach ($records as $record) {
@@ -83,7 +82,7 @@ class TwilioContentApi implements TwilioContentApiInterface
 
                 continue;
             }
-            // Allow a subsequent variant attempt if the first fails (e.g., snake_case vs TitleCase) but don't abort tests by throwing early.
+            // Don't throw yet: let the next key-casing variant try before giving up.
             Log::warning('Twilio Content template create failed variant', [
                 'variant' => $attempt['variant'],
                 'status' => $response->status(),
