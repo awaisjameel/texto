@@ -7,6 +7,7 @@ namespace Awaisjameel\Texto\Webhooks;
 use Awaisjameel\Texto\Contracts\WebhookHandlerInterface;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Exceptions\TextoWebhookValidationException;
+use Awaisjameel\Texto\Support\StatusMapper;
 use Awaisjameel\Texto\Support\TwilioSignatureValidator;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
@@ -41,7 +42,7 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
         $statusRaw = $request->input('MessageStatus');
         $statusMessageSid = $request->input('MessageSid');
         if ($statusRaw && $statusMessageSid) {
-            $status = \Awaisjameel\Texto\Support\StatusMapper::map(Driver::Twilio, $statusRaw, null);
+            $status = StatusMapper::map(Driver::Twilio, $statusRaw, null);
 
             return WebhookProcessingResult::status(Driver::Twilio, $statusMessageSid, $status, []);
         }

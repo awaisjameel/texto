@@ -9,7 +9,16 @@ use Awaisjameel\Texto\Commands\TextoTestSendCommand;
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
+use Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface;
+use Awaisjameel\Texto\Contracts\TwilioContentApiInterface;
+use Awaisjameel\Texto\Contracts\TwilioConversationsApiInterface;
+use Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface;
+use Awaisjameel\Texto\Jobs\StatusPollJob;
 use Awaisjameel\Texto\Repositories\EloquentMessageRepository;
+use Awaisjameel\Texto\Support\TelnyxMessagingApi;
+use Awaisjameel\Texto\Support\TwilioContentApi;
+use Awaisjameel\Texto\Support\TwilioConversationsApi;
+use Awaisjameel\Texto\Support\TwilioMessagingApi;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -40,20 +49,20 @@ class TextoServiceProvider extends PackageServiceProvider
         $twilioSid = config('texto.twilio.account_sid');
         $twilioToken = config('texto.twilio.auth_token');
         if ($twilioSid && $twilioToken) {
-            $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface::class, function () use ($twilioSid, $twilioToken) {
-                return new \Awaisjameel\Texto\Support\TwilioMessagingApi($twilioSid, $twilioToken);
+            $this->app->singleton(TwilioMessagingApiInterface::class, function () use ($twilioSid, $twilioToken) {
+                return new TwilioMessagingApi($twilioSid, $twilioToken);
             });
-            $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioConversationsApiInterface::class, function () use ($twilioSid, $twilioToken) {
-                return new \Awaisjameel\Texto\Support\TwilioConversationsApi($twilioSid, $twilioToken);
+            $this->app->singleton(TwilioConversationsApiInterface::class, function () use ($twilioSid, $twilioToken) {
+                return new TwilioConversationsApi($twilioSid, $twilioToken);
             });
-            $this->app->singleton(\Awaisjameel\Texto\Contracts\TwilioContentApiInterface::class, function () use ($twilioSid, $twilioToken) {
-                return new \Awaisjameel\Texto\Support\TwilioContentApi($twilioSid, $twilioToken);
+            $this->app->singleton(TwilioContentApiInterface::class, function () use ($twilioSid, $twilioToken) {
+                return new TwilioContentApi($twilioSid, $twilioToken);
             });
         }
         $telnyxKey = config('texto.telnyx.api_key');
         if ($telnyxKey) {
-            $this->app->singleton(\Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface::class, function () use ($telnyxKey) {
-                return new \Awaisjameel\Texto\Support\TelnyxMessagingApi($telnyxKey);
+            $this->app->singleton(TelnyxMessagingApiInterface::class, function () use ($telnyxKey) {
+                return new TelnyxMessagingApi($telnyxKey);
             });
         }
 
@@ -129,7 +138,7 @@ class TextoServiceProvider extends PackageServiceProvider
                 try {
                     $schedule = $this->app->make(Schedule::class);
                     // Using class reference lets Laravel construct the job cleanly and apply queue options.
-                    $schedule->job(\Awaisjameel\Texto\Jobs\StatusPollJob::class)
+                    $schedule->job(StatusPollJob::class)
                         ->everyMinute()
                         ->name('texto-status-poll')
                         ->withoutOverlapping(); // a run longer than a minute must not double-poll

@@ -5,6 +5,7 @@ namespace Awaisjameel\Texto\Tests;
 use Awaisjameel\Texto\TextoServiceProvider;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
 
 class TestCase extends Orchestra
@@ -18,8 +19,8 @@ class TestCase extends Orchestra
         );
 
         // Ensure messages table exists for tests (simulate migration)
-        if (! \Illuminate\Support\Facades\Schema::hasTable('texto_messages')) {
-            \Illuminate\Support\Facades\Schema::create('texto_messages', function (Blueprint $table) {
+        if (! Schema::hasTable('texto_messages')) {
+            Schema::create('texto_messages', function (Blueprint $table) {
                 $table->id();
                 $table->string('direction');
                 $table->string('driver');

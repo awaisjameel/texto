@@ -7,13 +7,15 @@ namespace Awaisjameel\Texto\ValueObjects;
 use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
+use Illuminate\Contracts\Support\Responsable;
+use Illuminate\Http\JsonResponse;
 
 /**
  * Value object returned after a message send attempt.
  * Implements Responsable, JsonSerializable & Stringable so it can be
  * returned directly from a route/controller.
  */
-final class SentMessageResult implements \Illuminate\Contracts\Support\Responsable, \JsonSerializable, \Stringable
+final class SentMessageResult implements \JsonSerializable, \Stringable, Responsable
 {
     /** @param string[] $mediaUrls */
     public function __construct(
@@ -66,7 +68,7 @@ final class SentMessageResult implements \Illuminate\Contracts\Support\Responsab
     }
 
     /** Allow returning directly from routes/controllers. */
-    public function toResponse($request): \Illuminate\Http\JsonResponse
+    public function toResponse($request): JsonResponse
     {
         return response()->json($this->toArray());
     }

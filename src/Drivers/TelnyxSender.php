@@ -9,10 +9,12 @@ use Awaisjameel\Texto\Contracts\PollableMessageSenderInterface;
 use Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface;
 use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
+use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Exceptions\TelnyxApiException;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Support\Retry;
 use Awaisjameel\Texto\Support\StatusMapper;
+use Awaisjameel\Texto\Support\TelnyxMessagingApi;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Illuminate\Support\Facades\Log;
@@ -29,7 +31,7 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
         }
         $this->messagingApi = $messagingApi ?? (app()->bound(TelnyxMessagingApiInterface::class)
             ? app(TelnyxMessagingApiInterface::class)
-            : new \Awaisjameel\Texto\Support\TelnyxMessagingApi($apiKey));
+            : new TelnyxMessagingApi($apiKey));
     }
 
     /**
@@ -111,7 +113,7 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
     /**
      * Poll latest status for a Telnyx message.
      */
-    public function fetchStatus(string $providerMessageId, mixed ...$context): ?\Awaisjameel\Texto\Enums\MessageStatus
+    public function fetchStatus(string $providerMessageId, mixed ...$context): ?MessageStatus
     {
         try {
             $data = $this->messagingApi->fetchMessage($providerMessageId);

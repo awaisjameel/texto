@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Awaisjameel\Texto\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 
 /**
  * Table: texto_messages
@@ -22,11 +23,11 @@ use Illuminate\Database\Eloquent\Model;
  * @property int|null $segments_count
  * @property float|null $cost_estimate
  * @property array|null $metadata
- * @property \Illuminate\Support\Carbon|null $sent_at
- * @property \Illuminate\Support\Carbon|null $received_at
- * @property \Illuminate\Support\Carbon|null $status_updated_at
- * @property \Illuminate\Support\Carbon|null $created_at
- * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property Carbon|null $sent_at
+ * @property Carbon|null $received_at
+ * @property Carbon|null $status_updated_at
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
  */
 class Message extends Model
 {

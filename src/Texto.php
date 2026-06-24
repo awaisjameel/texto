@@ -7,12 +7,14 @@ namespace Awaisjameel\Texto;
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
+use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Events\MessageFailed;
 use Awaisjameel\Texto\Events\MessageSent;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Jobs\SendMessageJob;
+use Awaisjameel\Texto\Models\Message;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Closure;
@@ -96,7 +98,7 @@ class Texto
                 $currentDriver = $driverName ?: config('texto.driver', 'twilio');
                 $queuedResult = new SentMessageResult(
                     Driver::from($currentDriver),
-                    \Awaisjameel\Texto\Enums\Direction::Sent,
+                    Direction::Sent,
                     $toNumber,
                     $fromNumber,
                     $body,
@@ -110,7 +112,7 @@ class Texto
                     $record = $this->messages->storeSent($queuedResult);
                 }
                 // Dispatch with the exact queued message id (0 if not stored so upgrade falls back later)
-                /** @var \Awaisjameel\Texto\Models\Message|null $record */
+                /** @var Message|null $record */
                 $queuedId = $record ? (int) $record->id : 0;
                 Bus::dispatch(new SendMessageJob($queuedId, $toNumber->e164, $body, [
                     'from' => $fromNumber?->e164,
@@ -136,7 +138,7 @@ class Texto
                 $currentDriver = $driverName ?: config('texto.driver', 'twilio');
                 $failed = new SentMessageResult(
                     Driver::from($currentDriver),
-                    \Awaisjameel\Texto\Enums\Direction::Sent,
+                    Direction::Sent,
                     $toNumber,
                     $fromNumber,
                     $body,

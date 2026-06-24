@@ -1,5 +1,6 @@
 <?php
 
+use Awaisjameel\Texto\Exceptions\TextoWebhookValidationException;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\Webhooks\TwilioWebhookHandler;
 use Illuminate\Http\Request;
@@ -33,7 +34,7 @@ it('rejects invalid signature', function () {
     config()->set('texto.twilio.auth_token', 'auth-token');
     $handler = new TwilioWebhookHandler;
     $handler->handle($request);
-})->throws(\Awaisjameel\Texto\Exceptions\TextoWebhookValidationException::class);
+})->throws(TextoWebhookValidationException::class);
 
 it('parses inbound message', function () {
     $url = 'https://example.com/texto/webhook/twilio';

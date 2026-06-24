@@ -6,6 +6,7 @@ namespace Awaisjameel\Texto\ValueObjects;
 
 use Awaisjameel\Texto\Exceptions\TextoException;
 use libphonenumber\NumberParseException;
+use libphonenumber\PhoneNumberFormat;
 use libphonenumber\PhoneNumberUtil;
 
 final class PhoneNumber
@@ -43,7 +44,7 @@ final class PhoneNumber
                 throw new TextoException('Invalid phone number: '.$raw);
             }
 
-            return new self($util->format($proto, \libphonenumber\PhoneNumberFormat::E164));
+            return new self($util->format($proto, PhoneNumberFormat::E164));
         } catch (NumberParseException $e) {
             throw new TextoException('Unable to parse phone number: '.$raw.' message: '.$e->getMessage());
         }

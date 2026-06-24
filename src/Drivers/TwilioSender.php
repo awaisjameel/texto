@@ -16,6 +16,9 @@ use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Exceptions\TwilioApiException;
 use Awaisjameel\Texto\Support\Retry;
 use Awaisjameel\Texto\Support\StatusMapper;
+use Awaisjameel\Texto\Support\TwilioContentApi;
+use Awaisjameel\Texto\Support\TwilioConversationsApi;
+use Awaisjameel\Texto\Support\TwilioMessagingApi;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Illuminate\Support\Facades\Log;
@@ -41,13 +44,13 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
         }
         $this->messagingApi = app()->bound(TwilioMessagingApiInterface::class)
             ? app(TwilioMessagingApiInterface::class)
-            : new \Awaisjameel\Texto\Support\TwilioMessagingApi($sid, $token);
+            : new TwilioMessagingApi($sid, $token);
         $this->conversationsApi = app()->bound(TwilioConversationsApiInterface::class)
             ? app(TwilioConversationsApiInterface::class)
-            : new \Awaisjameel\Texto\Support\TwilioConversationsApi($sid, $token);
+            : new TwilioConversationsApi($sid, $token);
         $this->contentApi = app()->bound(TwilioContentApiInterface::class)
             ? app(TwilioContentApiInterface::class)
-            : new \Awaisjameel\Texto\Support\TwilioContentApi($sid, $token);
+            : new TwilioContentApi($sid, $token);
     }
 
     /**

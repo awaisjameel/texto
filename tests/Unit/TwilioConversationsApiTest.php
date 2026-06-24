@@ -1,5 +1,6 @@
 <?php
 
+use Awaisjameel\Texto\Exceptions\TwilioApiValidationException;
 use Awaisjameel\Texto\Support\TwilioConversationsApi;
 use Illuminate\Support\Facades\Http;
 
@@ -30,4 +31,4 @@ it('handles participant duplicate', function () {
     $api = new TwilioConversationsApi('ACXXXX', 'token');
     $api->createConversation('Dup');
     $api->addParticipant('CH999', '+15551230000', '+15550001111');
-})->throws(\Awaisjameel\Texto\Exceptions\TwilioApiValidationException::class);
+})->throws(TwilioApiValidationException::class);

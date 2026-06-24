@@ -11,6 +11,7 @@ use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Models\Message;
 use Awaisjameel\Texto\Support\PollingParameterResolver;
+use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -83,7 +84,7 @@ class StatusPollJob implements ShouldQueue
             }
             if ($lastPollAt) {
                 try {
-                    $last = \Carbon\Carbon::parse($lastPollAt);
+                    $last = Carbon::parse($lastPollAt);
                     if ($last->diffInSeconds(now()) < $backoff) {
                         continue;
                     }
