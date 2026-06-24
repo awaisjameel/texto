@@ -82,7 +82,7 @@ class EloquentMessageRepository implements MessageRepositoryInterface
 
         // Always merge metadata; status webhooks may carry useful event/error/recipient detail
         // even when the status itself does not advance (e.g. out-of-order or duplicate callbacks).
-        $message->metadata = array_merge($message->metadata ?? [], $result->metadata ?? []);
+        $message->metadata = array_merge($message->metadata ?? [], $result->metadata);
 
         // Forward-only progression: never regress a terminal/more-advanced state. Providers deliver
         // delivery receipts out of order, so a late 'sent' must not overwrite 'delivered'.
