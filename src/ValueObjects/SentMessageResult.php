@@ -37,14 +37,14 @@ final class SentMessageResult implements \Illuminate\Contracts\Support\Responsab
     public function toArray(): array
     {
         return [
-            'driver' => $this->driver->name,
-            'direction' => $this->direction->name,
+            'driver' => $this->driver->value,
+            'direction' => $this->direction->value,
             'to' => (string) $this->to,
             'from' => $this->from?->e164,
             'body' => $this->body,
             'media_urls' => $this->mediaUrls,
             'metadata' => $this->metadata,
-            'status' => $this->status->name,
+            'status' => $this->status->value,
             'provider_message_id' => $this->providerMessageId,
             'error_code' => $this->errorCode,
         ];

@@ -33,9 +33,9 @@ class TextoServiceProvider extends PackageServiceProvider
     public function packageRegistered(): void
     {
         // Bind the driver manager as a singleton so driver extensions applied during runtime (e.g. in tests)
-        $this->app->singleton(DriverManagerInterface::class, function ($app) {
-            return new DriverManager($app['config']);
-        });
+        // persist. Binding the class directly (instead of a closure resolving $app['config']) lets the
+        // container inject the ConfigRepository by type-hint and keeps the binding Octane-safe.
+        $this->app->singleton(DriverManagerInterface::class, DriverManager::class);
         // Twilio API adapter bindings (only when credentials present). Skip binding to avoid test-time TypeErrors.
         $twilioSid = config('texto.twilio.account_sid');
         $twilioToken = config('texto.twilio.auth_token');
@@ -137,7 +137,8 @@ class TextoServiceProvider extends PackageServiceProvider
                     // Using class reference lets Laravel construct the job cleanly and apply queue options.
                     $schedule->job(\Awaisjameel\Texto\Jobs\StatusPollJob::class)
                         ->everyMinute()
-                        ->name('texto-status-poll');
+                        ->name('texto-status-poll')
+                        ->withoutOverlapping(); // a run longer than a minute must not double-poll
                 } catch (\Throwable $e) {
                     // Silently ignore if scheduler not available (e.g., during tests without scheduling)
                 }

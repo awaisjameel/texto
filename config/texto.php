@@ -43,7 +43,7 @@ return [
     ],
     'webhook' => [
         'secret' => env('TEXTO_WEBHOOK_SECRET'),
-        'rate_limit' => env('TEXTO_WEBHOOK_RATE_LIMIT', 60), // per minute
+        'rate_limit' => env('TEXTO_WEBHOOK_RATE_LIMIT', 300), // requests per minute per webhook endpoint
     ],
     'testing' => [
         'skip_webhook_validation' => env('TEXTO_TESTING_SKIP_WEBHOOK_VALIDATION', false),

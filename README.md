@@ -988,7 +988,7 @@ composer test
 | `EloquentMessageRepository`                                                     | Persistence & deterministic queued upgrade + polling updates.     |
 | Jobs (`SendMessageJob`, `StatusPollJob`)                                        | Async send & periodic status reconciliation.                      |
 | Webhook Handlers                                                                | Parse & validate inbound/status payloads per provider.            |
-| Support Utilities (`Retry`, `PollingParameterResolver`, `TwilioContentService`) | Cross‑cutting helpers.                                            |
+| Support Utilities (`Retry`, `PollingParameterResolver`)                         | Cross‑cutting helpers.                                            |
 | Value Objects / Enums                                                           | Strongly typed domain primitives.                                 |
 
 Design goals: minimal public API surface (`Texto::send`), encapsulated provider variance, explicit lifecycle events, observability via logs + metadata.

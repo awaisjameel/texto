@@ -72,7 +72,8 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
             throw new TextoSendFailedException('Twilio from number not configured.');
         }
 
-        $useConversations = ($this->config['use_conversations'] ?? true) === true;
+        // Default to the classic Messages API, matching config('texto.twilio.use_conversations').
+        $useConversations = ($this->config['use_conversations'] ?? false) === true;
 
         if ($useConversations) {
             return $this->sendViaConversations($to, $body, $fromNumber, $mediaUrls, $metadata);
@@ -412,7 +413,7 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
             $candidate = $context[0] ?? null;
             $conversationSid = is_string($candidate) ? $candidate : null;
         }
-        $useConversations = ($this->config['use_conversations'] ?? true) === true;
+        $useConversations = ($this->config['use_conversations'] ?? false) === true;
 
         // Attempt conversation fetch first if we have a conversation SID.
         if ($useConversations && $conversationSid) {

@@ -13,8 +13,13 @@ class RateLimitTextoWebhook
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $limit = (int) config('texto.webhook.rate_limit', 60);
-        $key = 'texto-webhook:'.sha1($request->ip().'|'.($request->path()));
+        $limit = (int) config('texto.webhook.rate_limit', 300);
+
+        // Key per webhook endpoint (path) rather than client IP. Provider traffic arrives through a
+        // load balancer, so IP-keying would either collapse every request into a single bucket (when
+        // TrustProxies is unset) or fan out per-edge unpredictably. A per-endpoint bucket is a stable
+        // DoS safety cap that pairs with the signature verification guarding these routes.
+        $key = 'texto-webhook:'.sha1($request->path());
         if (RateLimiter::tooManyAttempts($key, $limit)) {
             return response('Too Many Requests', 429);
         }
