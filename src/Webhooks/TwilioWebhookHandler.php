@@ -37,7 +37,7 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
             }
         }
 
-        // STATUS CALLBACK (MessageStatus present) -> treat first to avoid ambiguity
+        // Status callback (MessageStatus present): handle first to avoid ambiguity with inbound.
         $statusRaw = $request->input('MessageStatus');
         $statusMessageSid = $request->input('MessageSid');
         if ($statusRaw && $statusMessageSid) {
@@ -45,11 +45,10 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
 
             return WebhookProcessingResult::status(Driver::Twilio, $statusMessageSid, $status, []);
         }
-        // Conversations webhook path (EventType present) fallback to classic messaging otherwise
+        // Conversations webhook path (EventType present); falls through to classic messaging otherwise.
         $eventType = $request->input('EventType');
         if ($eventType) {
             if (! in_array($eventType, ['onMessageAdded', 'onMessageUpdated'])) {
-                // Ignore unrelated conversation events by returning a minimal received placeholder (could also throw)
                 throw new TextoWebhookValidationException('Unsupported Twilio conversation event type.');
             }
             $authorRaw = $request->input('Author');
@@ -72,7 +71,7 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
             if (is_array($mediaItems)) {
                 foreach ($mediaItems as $item) {
                     if (is_array($item)) {
-                        $url = $item['Url'] ?? null; // sometimes temporary URL
+                        $url = $item['Url'] ?? null;
                         if ($url) {
                             $media[] = $url;
                         }

@@ -29,7 +29,6 @@ it('deterministically upgrades only targeted queued messages among identical row
     $repo->upgradeQueued($queued[0]->id, $final1);
     $repo->upgradeQueued($queued[2]->id, $final3);
 
-    // Refresh all
     foreach ($queued as $m) {
         $m->refresh();
     }

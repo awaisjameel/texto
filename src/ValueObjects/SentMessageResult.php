@@ -50,7 +50,6 @@ final class SentMessageResult implements \Illuminate\Contracts\Support\Responsab
         ];
     }
 
-    /** {@inheritDoc} */
     public function jsonSerialize(): array
     {
         return $this->toArray();

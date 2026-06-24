@@ -27,7 +27,6 @@ it('sends conversation message with proper form keys', function () {
 
     Http::assertSent(function ($request) {
         if (str_contains($request->url(), '/Messages')) {
-            // Form body encoded
             $body = $request->body();
 
             return str_contains($body, 'Author=%2B15550001111') && str_contains($body, 'Body=Hello%20convo');

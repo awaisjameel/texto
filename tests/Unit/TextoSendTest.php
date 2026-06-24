@@ -29,7 +29,6 @@ it('stores a sent message using fake driver', function () {
     $record = Message::first();
     expect($record->body)->toBe('Hello world');
     expect($record->direction)->toBe('sent');
-    // reset overrides
     config()->set('texto.twilio.account_sid', null);
     config()->set('texto.twilio.auth_token', null);
     config()->set('texto.twilio.from_number', null);

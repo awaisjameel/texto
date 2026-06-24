@@ -74,25 +74,24 @@ class StatusPollJob implements ShouldQueue
             $meta = $message->metadata ?? [];
             $attempts = (int) ($meta['poll_attempts'] ?? 0);
             $lastPollAt = $meta['last_poll_at'] ?? null;
-            // Special cap for queued messages
+            // Queued rows get a lower attempt cap than other transient states.
             if ($message->status === MessageStatus::Queued->value && $attempts >= $queuedMaxAttempts) {
-                continue; // queued exhausted
+                continue;
             }
             if ($attempts >= $maxAttempts) {
-                continue; // exhausted attempts
+                continue;
             }
             if ($lastPollAt) {
                 try {
                     $last = \Carbon\Carbon::parse($lastPollAt);
                     if ($last->diffInSeconds(now()) < $backoff) {
-                        continue; // within backoff window
+                        continue;
                     }
                 } catch (\Throwable $e) {
-                    // malformed timestamp; proceed
+                    // Malformed timestamp: fall through and poll anyway.
                 }
             }
 
-            // Resolve driver instance
             try {
                 $driverEnum = Driver::from($message->driver);
             } catch (\Throwable $e) {
@@ -100,12 +99,13 @@ class StatusPollJob implements ShouldQueue
             }
             $sender = $drivers->sender($driverEnum);
             if (! $sender instanceof PollableMessageSenderInterface) {
-                continue; // driver does not support polling
+                continue;
             }
 
             $providerId = $message->provider_message_id;
             if (! $providerId) {
-                // Handle queued messages without provider id with capped attempts
+                // No provider id yet: each transient state has its own attempt cap before
+                // we give up and mark the row Ambiguous.
                 if ($message->status === MessageStatus::Queued->value) {
                     $nextAttempt = $attempts + 1;
                     if ($nextAttempt >= $queuedMaxAttempts) {
@@ -120,9 +120,9 @@ class StatusPollJob implements ShouldQueue
                     }
                     $polledCount++;
 
-                    continue; // nothing to fetch
+                    continue;
                 }
-                // Sending without provider id: treat similarly but allow more attempts (maxAttempts)
+                // Sending without provider id: same approach but allow up to maxAttempts.
                 if ($message->status === MessageStatus::Sending->value) {
                     $nextAttempt = $attempts + 1;
                     if ($nextAttempt >= $maxAttempts) {
@@ -138,9 +138,9 @@ class StatusPollJob implements ShouldQueue
                     }
                     $polledCount++;
 
-                    continue; // nothing to fetch
+                    continue;
                 }
-                // Sent state but no provider id: mark ambiguous immediately (unexpected scenario)
+                // Sent without provider id is unexpected: mark ambiguous immediately.
                 if ($message->status === MessageStatus::Sent->value) {
                     $messages->updatePolledStatus($message, MessageStatus::Ambiguous, [
                         'poll_terminal' => true,
@@ -150,7 +150,7 @@ class StatusPollJob implements ShouldQueue
                     $polledCount++;
                 }
 
-                continue; // no provider id to fetch
+                continue;
             }
 
             $newStatus = null;
@@ -204,7 +204,7 @@ class StatusPollJob implements ShouldQueue
             } else {
                 $extraMeta['poll_transient'] = $newStatus->value;
                 if ($progression) {
-                    $extraMeta['poll_promoted'] = true; // indicate we advanced status via polling
+                    $extraMeta['poll_promoted'] = true;
                 }
             }
 

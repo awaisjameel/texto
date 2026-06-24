@@ -111,7 +111,7 @@ class Texto
                 }
                 // Dispatch with the exact queued message id (0 if not stored so upgrade falls back later)
                 /** @var \Awaisjameel\Texto\Models\Message|null $record */
-                $queuedId = $record ? (int) $record->id : 0; // concrete model has id
+                $queuedId = $record ? (int) $record->id : 0;
                 Bus::dispatch(new SendMessageJob($queuedId, $toNumber->e164, $body, [
                     'from' => $fromNumber?->e164,
                     'media_urls' => $media,

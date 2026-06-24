@@ -50,7 +50,6 @@ class TextoServiceProvider extends PackageServiceProvider
                 return new \Awaisjameel\Texto\Support\TwilioContentApi($twilioSid, $twilioToken);
             });
         }
-        // Telnyx Messaging adapter binding (only when API key present)
         $telnyxKey = config('texto.telnyx.api_key');
         if ($telnyxKey) {
             $this->app->singleton(\Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface::class, function () use ($telnyxKey) {
@@ -58,12 +57,10 @@ class TextoServiceProvider extends PackageServiceProvider
             });
         }
 
-        // Message repository binding
         $this->app->singleton(MessageRepositoryInterface::class, function ($app) {
             return new EloquentMessageRepository;
         });
 
-        // Sender resolves from active driver
         $this->app->bind(MessageSenderInterface::class, function ($app) {
             /** @var DriverManagerInterface $manager */
             $manager = $app->make(DriverManagerInterface::class);
@@ -71,7 +68,6 @@ class TextoServiceProvider extends PackageServiceProvider
             return $manager->sender();
         });
 
-        // Facade root - inject dependencies
         $this->app->bind(Texto::class, function ($app) {
             return new Texto(
                 $app->make(DriverManagerInterface::class),
@@ -90,7 +86,6 @@ class TextoServiceProvider extends PackageServiceProvider
                 $token = config('texto.twilio.auth_token');
                 $timeout = (int) config('texto.twilio.timeout', 30);
 
-                // Start with a plain client; add auth only when both credentials are present.
                 $client = Http::timeout($timeout)
                     ->connectTimeout($timeout);
                 if ($sid && $token) {
@@ -113,7 +108,6 @@ class TextoServiceProvider extends PackageServiceProvider
                 return $client;
             });
         }
-        // Telnyx macro
         if (! Http::hasMacro('telnyx')) {
             Http::macro('telnyx', function () {
                 $base = config('texto.telnyx.base_url', 'https://api.telnyx.com/v2/');
