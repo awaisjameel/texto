@@ -522,7 +522,7 @@ Benefits: immediate API responses, backpressure via Laravel queue, deterministic
 | `MessageSent`          | Successful provider send                      | `SentMessageResult`                |
 | `MessageFailed`        | Send attempt threw `TextoSendFailedException` | `SentMessageResult`, error message |
 | `MessageReceived`      | Inbound webhook parsed                        | `WebhookProcessingResult`          |
-| `MessageStatusUpdated` | Stored message status mutated (webhook)       | `WebhookProcessingResult`          |
+| `MessageStatusUpdated` | Stored message status advanced (webhook)      | `WebhookProcessingResult`          |
 
 Subscribe in `EventServiceProvider` or use listeners/jobs for analytics, billing, triggers.
 
@@ -883,7 +883,9 @@ Thrown when message sending fails.
 
 #### TextoWebhookValidationException
 
-Thrown when webhook validation fails.
+Thrown when webhook validation fails (bad signature or malformed payload). It renders as an HTTP
+`403` response so providers treat the request as permanently unacceptable and stop retrying, rather
+than receiving a `500` that triggers retry storms.
 
 ### Interfaces
 

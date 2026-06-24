@@ -44,34 +44,57 @@ final class StatusMapper
 
     private static function mapTelnyx(?string $rawStatus, ?string $eventType): MessageStatus
     {
-        // Prefer explicit event type mapping (from status webhook) then fallback to per-recipient raw status.
-        if ($eventType) {
-            $et = strtolower($eventType);
-
-            return match ($et) {
-                'message.queued', 'message.delivery_status.queued' => MessageStatus::Queued,
-                'message.sending', 'message.delivery_status.sending' => MessageStatus::Sending,
-                'message.sent', 'message.delivery_status.sent' => MessageStatus::Sent,
-                'message.delivered', 'message.delivery_status.delivered', 'message.delivery_status.read' => MessageStatus::Delivered,
-                'message.failed', 'message.canceled', 'message.delivery_status.failed', 'message.delivery_status.undelivered' => MessageStatus::Failed,
-                'message.received' => MessageStatus::Received,
-                default => MessageStatus::Sent,
-            };
+        // The per-recipient delivery status (to[].status) is Telnyx's source of truth. Telnyx's
+        // real DLR event is `message.finalized`, which only carries the final state inside that
+        // recipient status (delivered / delivery_failed) — so the raw status must win over the
+        // event type. The event type is used only as a fallback when no raw status is present.
+        if ($rawStatus !== null) {
+            $mapped = self::mapTelnyxRawStatus($rawStatus);
+            if ($mapped !== null) {
+                return $mapped;
+            }
         }
-        if ($rawStatus) {
-            return match (strtolower($rawStatus)) {
-                'queued' => MessageStatus::Queued,
-                'sending' => MessageStatus::Sending,
-                'accepted' => MessageStatus::Sending,
-                'sent' => MessageStatus::Sent,
-                'delivered' => MessageStatus::Delivered,
-                'read' => MessageStatus::Delivered,
-                'failed' => MessageStatus::Failed,
-                'undelivered' => MessageStatus::Undelivered,
-                default => MessageStatus::Sent,
-            };
+
+        if ($eventType !== null) {
+            $mapped = self::mapTelnyxEventType($eventType);
+            if ($mapped !== null) {
+                return $mapped;
+            }
         }
 
         return MessageStatus::Queued; // conservative default for Telnyx initial API responses
+    }
+
+    /**
+     * Map a Telnyx per-recipient status string. Returns null for unrecognized values so the
+     * caller can fall back to the event type.
+     */
+    private static function mapTelnyxRawStatus(string $rawStatus): ?MessageStatus
+    {
+        return match (strtolower($rawStatus)) {
+            'queued', 'queued_canceled' => MessageStatus::Queued,
+            'sending', 'accepted' => MessageStatus::Sending,
+            'sent' => MessageStatus::Sent,
+            'delivered', 'read', 'webhook_delivered' => MessageStatus::Delivered,
+            'delivery_failed', 'sending_failed', 'failed', 'expired', 'rejected' => MessageStatus::Failed,
+            'undelivered', 'delivery_unconfirmed' => MessageStatus::Undelivered,
+            default => null,
+        };
+    }
+
+    /**
+     * Map a Telnyx webhook event type. `message.finalized` is intentionally not mapped here:
+     * its outcome lives in the per-recipient status, which is handled before this is consulted.
+     * Returns null for unrecognized event types.
+     */
+    private static function mapTelnyxEventType(string $eventType): ?MessageStatus
+    {
+        return match (strtolower($eventType)) {
+            'message.received' => MessageStatus::Received,
+            'message.queued' => MessageStatus::Queued,
+            'message.sending' => MessageStatus::Sending,
+            'message.sent' => MessageStatus::Sent,
+            default => null,
+        };
     }
 }

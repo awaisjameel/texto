@@ -77,20 +77,35 @@ class EloquentMessageRepository implements MessageRepositoryInterface
         if (! $message) {
             return null;
         }
+
         $previousStatus = $message->status;
-        $message->status = $result->status ? $result->status->value : $message->status;
-        // Merge metadata (status webhook may include additional event info)
-        $mergedMetadata = array_merge($message->metadata ?? [], $result->metadata ?? []);
-        $message->metadata = $mergedMetadata;
-        $message->status_updated_at = now();
+
+        // Always merge metadata; status webhooks may carry useful event/error/recipient detail
+        // even when the status itself does not advance (e.g. out-of-order or duplicate callbacks).
+        $message->metadata = array_merge($message->metadata ?? [], $result->metadata ?? []);
+
+        // Forward-only progression: never regress a terminal/more-advanced state. Providers deliver
+        // delivery receipts out of order, so a late 'sent' must not overwrite 'delivered'.
+        $progressed = false;
+        if ($result->status !== null) {
+            $current = MessageStatus::tryFrom($message->status);
+            if ($current === null || $current->progressesTo($result->status)) {
+                $message->status = $result->status->value;
+                $message->status_updated_at = now();
+                $progressed = true;
+            }
+        }
+
         $message->save();
-        Log::debug('Texto updated message status', [
+        Log::debug('Texto webhook status processed', [
             'id' => $message->id,
             'status' => $message->status,
             'previous' => $previousStatus,
+            'progressed' => $progressed,
         ]);
 
-        return $message;
+        // Only signal an update (→ MessageStatusUpdated event) when the status actually advanced.
+        return $progressed ? $message : null;
     }
 
     /**

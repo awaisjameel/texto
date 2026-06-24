@@ -187,28 +187,13 @@ class StatusPollJob implements ShouldQueue
                 continue;
             }
 
-            // Decide how to persist based on progression & terminal state.
-            // Previously we only persisted terminal states (delivered/failed/undelivered) keeping transient
-            // statuses (sending/sent) unchanged. This caused queued rows to remain queued even when the provider
-            // reported advancement to 'sent'. We now rank transient statuses and promote forward-only progression
-            // while still avoiding regressions. Metadata flag 'poll_promoted' indicates such an advancement.
+            // Persist forward-only progression. Terminal states fetched from the provider are
+            // authoritative and always stored; transient states only advance the row (never regress).
+            // Ranking/terminal logic lives on the MessageStatus enum so this stays in lock-step with
+            // the webhook persistence path. Metadata flag 'poll_promoted' marks a transient advancement.
             $current = MessageStatus::from($message->status);
-            $terminal = in_array($newStatus, [MessageStatus::Delivered, MessageStatus::Failed, MessageStatus::Undelivered], true);
-
-            // Ranking for forward-only progression (avoid regress / sideways moves)
-            $rank = [
-                MessageStatus::Ambiguous->value => 0,
-                MessageStatus::Queued->value => 1,
-                MessageStatus::Sending->value => 2,
-                MessageStatus::Sent->value => 3,
-                // Terminal endpoints share highest rank; we still treat them as terminal above.
-                MessageStatus::Delivered->value => 4,
-                MessageStatus::Failed->value => 4,
-                MessageStatus::Undelivered->value => 4,
-                MessageStatus::Received->value => 4,
-            ];
-
-            $progression = $rank[$newStatus->value] > $rank[$current->value];
+            $terminal = $newStatus->isTerminal();
+            $progression = $newStatus->rank() > $current->rank();
             $statusToStore = $terminal
                 ? $newStatus // Always persist terminal
                 : ($progression ? $newStatus : $current); // Promote if progressed
@@ -218,7 +203,7 @@ class StatusPollJob implements ShouldQueue
                 $extraMeta['poll_terminal'] = true;
             } else {
                 $extraMeta['poll_transient'] = $newStatus->value;
-                if ($progression && $statusToStore === $newStatus) {
+                if ($progression) {
                     $extraMeta['poll_promoted'] = true; // indicate we advanced status via polling
                 }
             }
