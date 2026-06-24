@@ -19,7 +19,7 @@ return [
         'account_sid' => env('TWILIO_ACCOUNT_SID'),
         'auth_token' => env('TWILIO_AUTH_TOKEN'),
         'from_number' => env('TWILIO_FROM_NUMBER'),
-        'use_conversations' => env('TWILIO_USE_CONVERSATIONS', false),
+        'use_conversations' => env('TWILIO_USE_CONVERSATIONS', true),
         'timeout' => env('TWILIO_HTTP_TIMEOUT', 30),
 
         // Optional explicit template

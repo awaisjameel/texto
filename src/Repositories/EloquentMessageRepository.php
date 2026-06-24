@@ -88,7 +88,8 @@ class EloquentMessageRepository implements MessageRepositoryInterface
         // delivery receipts out of order, so a late 'sent' must not overwrite 'delivered'.
         $progressed = false;
         if ($result->status !== null) {
-            $current = MessageStatus::tryFrom($message->status);
+            // The status column is nullable, so a row may carry no (or an unrecognized) status yet.
+            $current = $message->status !== null ? MessageStatus::tryFrom($message->status) : null;
             if ($current === null || $current->progressesTo($result->status)) {
                 $message->status = $result->status->value;
                 $message->status_updated_at = now();
