@@ -16,10 +16,12 @@ interface DriverManagerInterface
     public function sender(?Driver $driver = null): MessageSenderInterface;
 
     /**
-     * Register a custom driver implementation.
+     * Override a built-in driver's sender with a custom implementation.
      *
-     * @param  string  $name  Driver name
+     * @param  string  $name  Driver name; must match a recognized Driver enum value (e.g. "twilio", "telnyx")
      * @param  callable():MessageSenderInterface  $factory  Factory function returning sender instance
+     *
+     * @throws \Awaisjameel\Texto\Exceptions\TextoException If $name is not a recognized driver or already registered
      */
     public function extend(string $name, callable $factory): void;
 }

@@ -39,6 +39,14 @@ class DriverManager implements DriverManagerInterface
     public function extend(string $name, callable $factory): void
     {
         $name = strtolower($name);
+        // sender() resolves drivers by their Driver enum value, so an extension keyed to anything
+        // outside the enum could never be reached. Reject it up front instead of registering a
+        // silent no-op. Extensions therefore override a built-in driver's sender (the supported
+        // extension point); adding a genuinely new driver requires a new Driver enum case.
+        if (Driver::tryFrom($name) === null) {
+            $supported = implode(', ', array_map(fn (Driver $d) => $d->value, Driver::cases()));
+            throw new TextoException("Cannot extend unknown driver '$name'. Supported drivers: $supported.");
+        }
         if (isset($this->extensions[$name])) {
             throw new TextoException("Driver '$name' already registered.");
         }

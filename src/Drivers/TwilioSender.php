@@ -420,12 +420,6 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
             try {
                 $message = $this->conversationsApi->fetchConversationMessage($conversationSid, $providerMessageId);
 
-                // Log::info('Texto Twilio fetchStatus (conversation) response received', [
-                //     'conversation_sid' => $conversationSid,
-                //     'message_sid' => $providerMessageId,
-                //     'response' => $message,
-                // ]);
-
                 // Conversation message status fields can vary; attempt several common keys.
                 $raw = null;
                 // 1. Direct status property (rare)
@@ -453,20 +447,10 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
                 }
 
                 if ($raw) {
-                    // Log::info('Texto Twilio fetchStatus (conversation) parsed', [
-                    //     'conversation_sid' => $conversationSid,
-                    //     'message_sid' => $providerMessageId,
-                    //     'raw_status' => $raw,
-                    // ]);
-
                     return StatusMapper::map(Driver::Twilio, $raw, null);
                 }
 
                 // If we couldn't derive a status from the conversation message, fall through to legacy path.
-                // Log::debug('Texto Twilio fetchStatus (conversation) no status found, falling back to Messages API', [
-                //     'conversation_sid' => $conversationSid,
-                //     'message_sid' => $providerMessageId,
-                // ]);
             } catch (\Throwable $e) {
                 // Conversation fetch failed; log and fall back to legacy Messages API.
                 Log::warning('Twilio fetchStatus (conversation) failed, falling back', [
