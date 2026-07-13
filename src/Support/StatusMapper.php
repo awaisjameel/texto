@@ -21,6 +21,7 @@ final class StatusMapper
         return match ($driver) {
             Driver::Twilio => self::mapTwilio($rawStatus ?? $eventType),
             Driver::Telnyx => self::mapTelnyx($rawStatus, $eventType),
+            Driver::Whatsapp => self::mapWhatsapp($rawStatus),
         };
     }
 
@@ -95,6 +96,23 @@ final class StatusMapper
             'message.sending' => MessageStatus::Sending,
             'message.sent' => MessageStatus::Sent,
             default => null,
+        };
+    }
+
+    private static function mapWhatsapp(?string $status): MessageStatus
+    {
+        if (! $status) {
+            return MessageStatus::Sent;
+        }
+
+        return match (strtolower($status)) {
+            'accepted', 'held_for_quality_assessment' => MessageStatus::Sending,
+            'sent' => MessageStatus::Sent,
+            'delivered' => MessageStatus::Delivered,
+            'read' => MessageStatus::Read,
+            'failed' => MessageStatus::Failed,
+            'deleted' => MessageStatus::Undelivered,
+            default => MessageStatus::Sent,
         };
     }
 }

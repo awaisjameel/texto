@@ -9,13 +9,16 @@ use Awaisjameel\Texto\Http\Middleware\VerifyTextoWebhookSecret;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
 use Awaisjameel\Texto\Webhooks\TelnyxWebhookHandler;
 use Awaisjameel\Texto\Webhooks\TwilioWebhookHandler;
+use Awaisjameel\Texto\Webhooks\WhatsappWebhookHandler;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 $processWebhook = function (WebhookProcessingResult $result, MessageRepositoryInterface $repo): void {
     if ($result->direction === Direction::Received) {
-        $repo->storeInbound($result);
-        event(new MessageReceived($result));
+        $message = $repo->storeInbound($result);
+        if ($message->wasRecentlyCreated) {
+            event(new MessageReceived($result));
+        }
 
         return;
     }
@@ -39,3 +42,27 @@ Route::middleware([VerifyTextoWebhookSecret::class, RateLimitTextoWebhook::class
 
         return response()->json(['ok' => true]);
     })->name('texto.webhook.telnyx');
+
+// Meta validates subscriptions with this GET handshake. It cannot send Texto's shared secret.
+Route::middleware([RateLimitTextoWebhook::class])
+    ->get('/texto/webhook/whatsapp', function (Request $request) {
+        $verifyToken = (string) config('texto.whatsapp.verify_token');
+        if ($verifyToken !== ''
+            && $request->query('hub_mode') === 'subscribe'
+            && hash_equals($verifyToken, (string) $request->query('hub_verify_token'))) {
+            return response((string) $request->query('hub_challenge'), 200)
+                ->header('Content-Type', 'text/plain');
+        }
+
+        return response('Forbidden', 403);
+    })->name('texto.webhook.whatsapp.verify');
+
+// Meta signs the raw request body with X-Hub-Signature-256; validation happens in the handler.
+Route::middleware([RateLimitTextoWebhook::class])
+    ->post('/texto/webhook/whatsapp', function (Request $request, WhatsappWebhookHandler $handler, MessageRepositoryInterface $repo) use ($processWebhook) {
+        foreach ($handler->handleBatch($request) as $result) {
+            $processWebhook($result, $repo);
+        }
+
+        return response()->json(['ok' => true]);
+    })->name('texto.webhook.whatsapp');

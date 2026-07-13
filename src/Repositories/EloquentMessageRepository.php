@@ -9,6 +9,7 @@ use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Models\Message;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class EloquentMessageRepository implements MessageRepositoryInterface
@@ -51,7 +52,7 @@ class EloquentMessageRepository implements MessageRepositoryInterface
 
     public function storeInbound(WebhookProcessingResult $result): Message
     {
-        $record = Message::create([
+        $attributes = [
             'direction' => $result->direction->value,
             'driver' => $result->driver->value,
             'from_number' => $result->from?->e164,
@@ -62,8 +63,25 @@ class EloquentMessageRepository implements MessageRepositoryInterface
             'provider_message_id' => $result->providerMessageId,
             'metadata' => $result->metadata,
             'received_at' => now(),
+        ];
+
+        // Meta can retry the same webhook delivery. Its WAMID is stable, so use it as the
+        // idempotency key and only emit an inbound event for a newly-created local record.
+        // A short atomic-cache lock also prevents the first concurrent deliveries from racing
+        // each other. Production deployments should use their normal shared cache (for example,
+        // Redis) when they run multiple application nodes.
+        $key = 'texto:inbound:'.hash('sha256', $result->driver->value."\0".$result->providerMessageId);
+        $record = Cache::lock($key, 10)->block(2, function () use ($result, $attributes): Message {
+            return Message::firstOrCreate([
+                'driver' => $result->driver->value,
+                'provider_message_id' => $result->providerMessageId,
+            ], $attributes);
+        });
+        Log::debug('Texto stored inbound message', [
+            'id' => $record->id,
+            'provider_id' => $record->provider_message_id,
+            'created' => $record->wasRecentlyCreated,
         ]);
-        Log::debug('Texto stored inbound message', ['id' => $record->id, 'provider_id' => $record->provider_message_id]);
 
         return $record;
     }
@@ -73,7 +91,9 @@ class EloquentMessageRepository implements MessageRepositoryInterface
         if (! $result->providerMessageId) {
             return null;
         }
-        $message = Message::where('provider_message_id', $result->providerMessageId)->first();
+        $message = Message::where('driver', $result->driver->value)
+            ->where('provider_message_id', $result->providerMessageId)
+            ->first();
         if (! $message) {
             return null;
         }

@@ -23,8 +23,15 @@ class RateLimitTextoWebhook
         if (RateLimiter::tooManyAttempts($key, $limit)) {
             return response('Too Many Requests', 429);
         }
-        RateLimiter::hit($key, 60); // decay after 60 seconds
 
-        return $next($request);
+        $response = $next($request);
+
+        // Count only authenticated, successfully processed calls. Otherwise an attacker can
+        // exhaust the shared endpoint bucket with unsigned requests and prevent Meta deliveries.
+        if ($response->isSuccessful()) {
+            RateLimiter::hit($key, 60); // decay after 60 seconds
+        }
+
+        return $response;
     }
 }

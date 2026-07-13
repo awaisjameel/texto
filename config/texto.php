@@ -41,6 +41,17 @@ return [
         'webhook_secret' => env('TELNYX_WEBHOOK_SECRET'),
         'timeout' => env('TELNYX_HTTP_TIMEOUT', 30),
     ],
+    'whatsapp' => [
+        // Deliberately pin the Graph API version; upgrade only after reviewing Meta's changelog.
+        'base_url' => env('WHATSAPP_BASE_URL', 'https://graph.facebook.com/v25.0/'),
+        'access_token' => env('WHATSAPP_ACCESS_TOKEN'),
+        'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
+        'app_secret' => env('WHATSAPP_APP_SECRET'),
+        'verify_token' => env('WHATSAPP_VERIFY_TOKEN'),
+        // Used only to populate the local message record; Meta derives the sender from phone_number_id.
+        'from_number' => env('WHATSAPP_FROM_NUMBER'),
+        'timeout' => env('WHATSAPP_HTTP_TIMEOUT', 30),
+    ],
     'webhook' => [
         'secret' => env('TEXTO_WEBHOOK_SECRET'),
         'rate_limit' => env('TEXTO_WEBHOOK_RATE_LIMIT', 300), // requests per minute per webhook endpoint

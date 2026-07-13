@@ -1,5 +1,11 @@
 # Migration from twilio/sdk to Direct REST
 
+## WhatsApp driver (additive)
+
+The WhatsApp Cloud API driver is additive. If you have published `config/texto.php`, merge in the new `whatsapp` configuration block and set its environment variables before selecting `TEXTO_DRIVER=whatsapp`. Its webhook endpoint (`/texto/webhook/whatsapp`) intentionally bypasses `X-Texto-Secret`: Meta authenticates the raw body with `X-Hub-Signature-256` and `WHATSAPP_APP_SECRET` instead.
+
+The current WhatsApp configuration defaults to Graph API `v25.0`. If you override `WHATSAPP_BASE_URL`, update it to a supported Graph version. WhatsApp delivery receipts now preserve `read` as a distinct status. Meta webhook retries are deduplicated using the provider message ID; multi-node deployments should use a shared, lock-capable cache such as Redis.
+
 This document summarizes the transition removing the `twilio/sdk` dependency in favor of Laravel's HTTP client with first-class adapters.
 
 ## Summary

@@ -19,7 +19,9 @@ return new class extends Migration
             $table->text('body')->nullable();
             $table->json('media_urls')->nullable();
             $table->string('status')->nullable();
-            // Provider ID can be null initially (queued). Use a regular index (not unique) to support multiple nulls across drivers.
+            // Provider IDs can be null initially (queued). Index this independently; inbound
+            // webhook idempotency is enforced in the repository because nullable unique-index
+            // semantics differ across the databases supported by this package.
             $table->string('provider_message_id')->nullable()->index();
             $table->string('error_code')->nullable();
             $table->unsignedInteger('segments_count')->nullable();
