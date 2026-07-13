@@ -225,7 +225,7 @@ TEXTO_STATUS_POLL_BATCH=100
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_FROM_NUMBER=+15550001111
-TWILIO_USE_CONVERSATIONS=false      # opt in to the classic Messages API by setting false (default: Conversations API)
+TWILIO_USE_CONVERSATIONS=true       # opt in to the classic Messages API by setting false (default: Conversations API)
 TWILIO_SMS_TEMPLATE_FRIENDLY_NAME=texto_sms_template
 TWILIO_MMS_TEMPLATE_FRIENDLY_NAME=texto_mms_template
 TWILIO_CONVERSATION_PREFIX=Texto
@@ -319,6 +319,7 @@ Configures fallback polling for messages stuck in transient states:
     'mms_template_friendly_name' => env('TWILIO_MMS_TEMPLATE_FRIENDLY_NAME', 'texto_mms_template'),
     'conversation_prefix' => env('TWILIO_CONVERSATION_PREFIX', 'Texto'),
     'conversation_webhook_url' => env('TWILIO_CONVERSATION_WEBHOOK_URL'),
+    'conversation_cache_ttl' => env('TWILIO_CONVERSATION_CACHE_TTL', 604800),
 ],
 ```
 
@@ -625,7 +626,7 @@ Metadata counters (`poll_attempts`, `last_poll_at`, flags) are merged into `meta
 
 ## 14. Twilio Conversations & Content Templates
 
-The conversation API is the default. You opt in for clasic Messages API by setting `TWILIO_USE_CONVERSATIONS=false`, Texto:
+The Conversations API is the default. You opt in to the classic Messages API (one call per SMS, outbound-only) by setting `TWILIO_USE_CONVERSATIONS=false`. In Conversations mode, Texto:
 
 1. Lazily initializes Conversations sub‑client.
 2. Ensures (or creates) SMS / MMS Content Templates (friendly names configurable).
@@ -635,16 +636,20 @@ The conversation API is the default. You opt in for clasic Messages API by setti
 
 Captured metadata includes: `conversation_sid`, `conversation_reused`, optional `conversation_webhook_sid`.
 
-#### Credential‑Aware Binding (New)
+Successful sends cache their conversation SID per `(from, to)` pair (default 7 days, `TWILIO_CONVERSATION_CACHE_TTL` seconds, `0` disables), so repeat sends to the same recipient skip the conversation setup calls and only POST the message. If a cached conversation was closed or deleted in the meantime, the full setup flow runs once automatically. A conversation created for a send that ultimately fails is deleted again (best effort) so failed sends leave no orphans.
 
-As of 1.1.0 the package only binds Twilio (and Telnyx) low‑level API adapter singletons when their required credentials are present at boot time. This prevents accidental
-TypeErrors in test environments where env vars are intentionally omitted. If you rely on resolving (e.g.) `TwilioMessagingApiInterface` from the container in tests,
-ensure you either:
+On the classic Messages path, `metadata['webhook_url']` is passed to Twilio as the per‑message `StatusCallback` (mirroring the Telnyx driver), so delivery receipts reach `/texto/webhook/twilio` without configuring callbacks on the number or messaging service.
 
-1. Provide fake credentials via env (e.g. `TWILIO_ACCOUNT_SID=AC_TEST`, `TWILIO_AUTH_TOKEN=test`), or
-2. Manually bind a fake implementation in a test service provider.
+> **Webhook signature note:** Twilio signs the public URL of your webhook. If the app runs behind a TLS‑terminating proxy or load balancer, configure Laravel's `TrustProxies` middleware so `fullUrl()` reconstructs the public `https://` URL — otherwise every signature validation fails.
 
-The HTTP macro `Http::twilio()` is also credential‑aware; it omits Basic Auth when credentials are missing so generic tests can stub endpoints without failures.
+#### Per‑Instance Credentials (no container singletons)
+
+The package no longer binds the low‑level provider API adapters (`TwilioMessagingApiInterface`, `TelnyxMessagingApiInterface`, …) into the container. Adapters capture
+credentials at construction, so a boot‑time singleton would silently keep using stale (or another tenant's) credentials under per‑send `driver_config` overrides. Every
+sender now constructs its adapters from its own configuration, and each adapter authenticates its HTTP calls with its own credentials. Tests and custom integrations
+inject fake adapters through the sender constructors, e.g. `new TwilioSender($config, $fakeMessagingApi)`.
+
+The HTTP macro `Http::twilio()` is still credential‑aware; it omits Basic Auth when credentials are missing so generic tests can stub endpoints without failures.
 
 #### Content Template Creation Robustness
 

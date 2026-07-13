@@ -10,6 +10,7 @@ use Awaisjameel\Texto\Exceptions\TwilioApiException;
 use Awaisjameel\Texto\Exceptions\TwilioApiNotFoundException;
 use Awaisjameel\Texto\Exceptions\TwilioApiRateLimitException;
 use Awaisjameel\Texto\Exceptions\TwilioApiValidationException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -22,10 +23,15 @@ class TwilioConversationsApi implements TwilioConversationsApiInterface
         }
     }
 
+    protected function http(): PendingRequest
+    {
+        return Http::twilio('conversations')->withBasicAuth($this->accountSid, $this->authToken);
+    }
+
     public function createConversation(string $friendlyName, array $params = []): array
     {
         $payload = ['FriendlyName' => $friendlyName] + $params;
-        $resp = Http::twilio('conversations')->post('/Conversations', $payload);
+        $resp = $this->http()->post('/Conversations', $payload);
 
         return $this->handle($resp, 'createConversation');
     }
@@ -36,14 +42,14 @@ class TwilioConversationsApi implements TwilioConversationsApiInterface
             'MessagingBinding.Address' => $address,
             'MessagingBinding.ProxyAddress' => $proxyAddress,
         ] + $params;
-        $resp = Http::twilio('conversations')->post('/Conversations/'.$conversationSid.'/Participants', $payload);
+        $resp = $this->http()->post('/Conversations/'.$conversationSid.'/Participants', $payload);
 
         return $this->handle($resp, 'addParticipant', ['conversation_sid' => $conversationSid]);
     }
 
     public function sendConversationMessage(string $conversationSid, array $payload): array
     {
-        $resp = Http::twilio('conversations')->post('/Conversations/'.$conversationSid.'/Messages', $payload);
+        $resp = $this->http()->post('/Conversations/'.$conversationSid.'/Messages', $payload);
 
         return $this->handle($resp, 'sendConversationMessage', ['conversation_sid' => $conversationSid]);
     }
@@ -51,13 +57,13 @@ class TwilioConversationsApi implements TwilioConversationsApiInterface
     public function attachWebhook(string $conversationSid, string $url, array $filters = ['onMessageAdded', 'onMessageUpdated'], array $triggers = []): ?array
     {
         // Delete existing webhooks first (best-effort)
-        $existing = Http::twilio('conversations')->get('/Conversations/'.$conversationSid.'/Webhooks');
+        $existing = $this->http()->get('/Conversations/'.$conversationSid.'/Webhooks');
         if ($existing->successful()) {
             $items = $existing->json('webhooks') ?? [];
             foreach ($items as $w) {
                 $sid = $w['sid'] ?? null;
                 if ($sid) {
-                    Http::twilio('conversations')->delete('/Conversations/'.$conversationSid.'/Webhooks/'.$sid);
+                    $this->http()->delete('/Conversations/'.$conversationSid.'/Webhooks/'.$sid);
                 }
             }
         }
@@ -65,11 +71,21 @@ class TwilioConversationsApi implements TwilioConversationsApiInterface
             'Target' => 'webhook',
             'Configuration.Url' => $url,
             'Configuration.Method' => 'POST',
-            'Configuration.Filters' => implode(',', $filters),
-            'Configuration.Triggers' => implode(',', $triggers ?: $filters),
             'Configuration.ReplayAfter' => 0,
         ];
-        $resp = Http::twilio('conversations')->post('/Conversations/'.$conversationSid.'/Webhooks', $payload);
+        // Built manually rather than via Http::asForm so the array parameters repeat per item
+        // (Configuration.Filters=a&Configuration.Filters=b) — Twilio does not honor
+        // comma-joined values, which would leave the webhook without working event filters.
+        $form = http_build_query($payload, '', '&', PHP_QUERY_RFC3986);
+        foreach ($filters as $filter) {
+            $form .= '&Configuration.Filters='.rawurlencode($filter);
+        }
+        foreach (($triggers ?: $filters) as $trigger) {
+            $form .= '&Configuration.Triggers='.rawurlencode($trigger);
+        }
+        $resp = $this->http()
+            ->withBody($form, 'application/x-www-form-urlencoded')
+            ->post('/Conversations/'.$conversationSid.'/Webhooks');
         $data = $this->handle($resp, 'attachWebhook', ['conversation_sid' => $conversationSid]);
 
         return $data ?: null;
@@ -77,14 +93,14 @@ class TwilioConversationsApi implements TwilioConversationsApiInterface
 
     public function fetchConversationMessage(string $conversationSid, string $messageSid): array
     {
-        $resp = Http::twilio('conversations')->get('/Conversations/'.$conversationSid.'/Messages/'.$messageSid);
+        $resp = $this->http()->get('/Conversations/'.$conversationSid.'/Messages/'.$messageSid);
 
         return $this->handle($resp, 'fetchConversationMessage', ['conversation_sid' => $conversationSid, 'message_sid' => $messageSid]);
     }
 
     public function deleteConversation(string $conversationSid): bool
     {
-        $resp = Http::twilio('conversations')->delete('/Conversations/'.$conversationSid);
+        $resp = $this->http()->delete('/Conversations/'.$conversationSid);
         if ($resp->successful() || $resp->status() === 204) {
             return true;
         }

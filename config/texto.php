@@ -32,6 +32,9 @@ return [
         'conversation_prefix' => env('TWILIO_CONVERSATION_PREFIX', 'Texto'),
         // Default webhook URL for new Conversations (can be overridden per send via metadata['webhook_url'])
         'conversation_webhook_url' => env('TWILIO_CONVERSATION_WEBHOOK_URL'),
+        // Successful conversation sends cache their conversation SID per (from, to) pair for
+        // this many seconds so repeat sends skip the setup API calls. 0 disables the cache.
+        'conversation_cache_ttl' => env('TWILIO_CONVERSATION_CACHE_TTL', 604800),
     ],
     'telnyx' => [
         'base_url' => env('TELNYX_BASE_URL', 'https://api.telnyx.com/v2/'),
@@ -39,6 +42,7 @@ return [
         'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
         'from_number' => env('TELNYX_FROM_NUMBER'),
         'webhook_secret' => env('TELNYX_WEBHOOK_SECRET'),
+        'webhook_tolerance_seconds' => env('TELNYX_WEBHOOK_TOLERANCE', 300),
         'timeout' => env('TELNYX_HTTP_TIMEOUT', 30),
     ],
     'whatsapp' => [

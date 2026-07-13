@@ -6,6 +6,7 @@ namespace Awaisjameel\Texto\Support;
 
 use Awaisjameel\Texto\Contracts\TwilioContentApiInterface;
 use Awaisjameel\Texto\Exceptions\TwilioApiException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -20,10 +21,15 @@ class TwilioContentApi implements TwilioContentApiInterface
         }
     }
 
+    protected function http(): PendingRequest
+    {
+        return Http::twilio('content')->withBasicAuth($this->accountSid, $this->authToken);
+    }
+
     public function findTemplateByFriendlyName(string $friendlyName): ?array
     {
         try {
-            $response = Http::twilio('content')->get('/Content', ['FriendlyName' => $friendlyName]);
+            $response = $this->http()->get('/Content', ['FriendlyName' => $friendlyName]);
         } catch (Throwable $e) {
             Log::warning('Twilio Content API query failed', ['friendly_name' => $friendlyName, 'error' => $e->getMessage()]);
             throw new TwilioApiException('Unable to query Twilio Content templates.', 0, null, ['friendly_name' => $friendlyName]);
@@ -52,7 +58,7 @@ class TwilioContentApi implements TwilioContentApiInterface
         ];
         foreach ($attempts as $attempt) {
             try {
-                $response = Http::twilio('content')->post('/Content', $attempt['body']);
+                $response = $this->http()->post('/Content', $attempt['body']);
             } catch (Throwable $e) {
                 Log::warning('Twilio Content template create HTTP exception', ['variant' => $attempt['variant'], 'error' => $e->getMessage()]);
 

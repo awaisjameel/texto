@@ -8,6 +8,12 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Guards application-defined endpoints with a shared secret (X-Texto-Secret header).
+ *
+ * Do not attach this to provider webhook routes: Twilio, Telnyx and Meta cannot send custom
+ * headers, so the packaged routes rely on each provider's cryptographic signature instead.
+ */
 class VerifyTextoWebhookSecret
 {
     public function handle(Request $request, Closure $next): Response
