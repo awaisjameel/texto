@@ -1,7 +1,7 @@
 # Texto
 
 **
-Unified, extensible Laravel gateway for sending & receiving SMS/MMS over Twilio & Telnyx.
+Unified, extensible Laravel gateway for sending & receiving SMS/MMS over Twilio & Telnyx, plus WhatsApp through Meta's Cloud API.
 Batteries included: queueing, retries, events, webhooks, polling, typed value objects.**
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/awaisjameel/texto.svg?style=flat-square)](https://packagist.org/packages/awaisjameel/texto)
@@ -237,6 +237,13 @@ TELNYX_MESSAGING_PROFILE_ID=...
 TELNYX_FROM_NUMBER=+15550002222
 TELNYX_WEBHOOK_SECRET=base64-encoded-public-key
 TELNYX_HTTP_TIMEOUT=30              # seconds for outbound API calls
+
+# WhatsApp Cloud API
+WHATSAPP_ACCESS_TOKEN=...
+WHATSAPP_PHONE_NUMBER_ID=...
+WHATSAPP_APP_SECRET=...
+WHATSAPP_VERIFY_TOKEN=...
+WHATSAPP_FROM_NUMBER=+15550003333 # local sender record only
 ```
 
 ---
@@ -249,7 +256,7 @@ After installation, you'll find the configuration file at `config/texto.php`. He
 
 | Key              | Default    | Description                                          |
 | ---------------- | ---------- | ---------------------------------------------------- |
-| `driver`         | `'twilio'` | Active messaging provider (`'twilio'` or `'telnyx'`) |
+| `driver`         | `'twilio'` | Active messaging provider (`'twilio'`, `'telnyx'`, or `'whatsapp'`) |
 | `store_messages` | `true`     | Whether to persist messages in the database          |
 | `queue`          | `false`    | Enable async message sending via Laravel queues      |
 | `default_region` | `'US'`     | Default region for phone number parsing              |
@@ -331,6 +338,10 @@ Twilio-specific settings for both classic and Conversations API modes.
 
 Telnyx API credentials, messaging profile configuration, the base64-encoded public key used to verify webhook signatures, and a transport timeout (seconds) for outbound REST calls.
 
+### WhatsApp Configuration
+
+Configure `access_token`, `phone_number_id`, `app_secret`, and `verify_token` in the `whatsapp` block. WhatsApp uses Meta's signed webhook at `/texto/webhook/whatsapp` and does not support status polling. See the complete [WhatsApp Cloud API guide](docs/whatsapp.md) for setup, templates, media, and webhook configuration.
+
 ### Testing Configuration
 
 ```php
@@ -380,6 +391,11 @@ Temporarily use a different provider for specific messages:
 // Send via Telnyx instead of default Twilio
 $result = Texto::send('+15551234567', 'Via Telnyx', [
     'driver' => 'telnyx'
+]);
+
+// Send via Meta's WhatsApp Cloud API (free-form messages require an open 24-hour service window)
+$result = Texto::send('+15551234567', 'Via WhatsApp', [
+    'driver' => 'whatsapp',
 ]);
 ```
 

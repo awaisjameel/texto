@@ -10,6 +10,7 @@ enum MessageStatus: string
     case Sending = 'sending';
     case Sent = 'sent';
     case Delivered = 'delivered';
+    case Read = 'read';
     case Received = 'received';
     case Failed = 'failed';
     case Undelivered = 'undelivered';
@@ -28,6 +29,7 @@ enum MessageStatus: string
             self::Sending => 2,
             self::Sent => 3,
             self::Delivered, self::Failed, self::Undelivered, self::Received => 4,
+            self::Read => 5,
         };
     }
 
@@ -35,7 +37,7 @@ enum MessageStatus: string
     public function isTerminal(): bool
     {
         return match ($this) {
-            self::Delivered, self::Failed, self::Undelivered => true,
+            self::Read, self::Failed, self::Undelivered => true,
             default => false,
         };
     }

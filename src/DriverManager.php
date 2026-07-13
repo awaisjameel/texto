@@ -8,6 +8,7 @@ use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
 use Awaisjameel\Texto\Drivers\TelnyxSender;
 use Awaisjameel\Texto\Drivers\TwilioSender;
+use Awaisjameel\Texto\Drivers\WhatsappSender;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Exceptions\TextoException;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
@@ -33,6 +34,7 @@ class DriverManager implements DriverManagerInterface
         return match ($driver) {
             Driver::Twilio => new TwilioSender($driverConfig),
             Driver::Telnyx => new TelnyxSender($driverConfig),
+            Driver::Whatsapp => new WhatsappSender($driverConfig),
         };
     }
 

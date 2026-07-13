@@ -13,9 +13,10 @@ final class Retry
      * @template T
      *
      * @param  Closure():T  $callback
+     * @param  null|Closure(Throwable):bool  $shouldRetry
      * @return T
      */
-    public static function exponential(Closure $callback, int $maxAttempts, int $backoffStartMs): mixed
+    public static function exponential(Closure $callback, int $maxAttempts, int $backoffStartMs, ?Closure $shouldRetry = null): mixed
     {
         $attempt = 0;
         $delay = $backoffStartMs;
@@ -24,7 +25,7 @@ final class Retry
                 return $callback();
             } catch (Throwable $e) {
                 $attempt++;
-                if ($attempt >= $maxAttempts) {
+                if ($attempt >= $maxAttempts || ($shouldRetry !== null && ! $shouldRetry($e))) {
                     throw $e;
                 }
                 usleep($delay * 1000);

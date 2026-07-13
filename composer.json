@@ -1,6 +1,6 @@
 {
     "name": "awaisjameel/texto",
-    "description": "A Laravel package to handle messaging (SMS, MMS) using services Twilio or Telnyx",
+    "description": "A Laravel package to handle messaging (SMS, MMS, WhatsApp) using Twilio, Telnyx, or Meta's Cloud API",
     "type": "library",
     "keywords": [
         "awaisjameel",
@@ -10,6 +10,7 @@
         "mms",
         "twilio",
         "telnyx",
+        "whatsapp",
         "messaging",
         "messages"
     ],

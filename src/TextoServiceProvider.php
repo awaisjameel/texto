@@ -13,12 +13,14 @@ use Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface;
 use Awaisjameel\Texto\Contracts\TwilioContentApiInterface;
 use Awaisjameel\Texto\Contracts\TwilioConversationsApiInterface;
 use Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface;
+use Awaisjameel\Texto\Contracts\WhatsappApiInterface;
 use Awaisjameel\Texto\Jobs\StatusPollJob;
 use Awaisjameel\Texto\Repositories\EloquentMessageRepository;
 use Awaisjameel\Texto\Support\TelnyxMessagingApi;
 use Awaisjameel\Texto\Support\TwilioContentApi;
 use Awaisjameel\Texto\Support\TwilioConversationsApi;
 use Awaisjameel\Texto\Support\TwilioMessagingApi;
+use Awaisjameel\Texto\Support\WhatsappApi;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -63,6 +65,13 @@ class TextoServiceProvider extends PackageServiceProvider
         if ($telnyxKey) {
             $this->app->singleton(TelnyxMessagingApiInterface::class, function () use ($telnyxKey) {
                 return new TelnyxMessagingApi($telnyxKey);
+            });
+        }
+        $whatsappToken = config('texto.whatsapp.access_token');
+        $whatsappPhoneNumberId = config('texto.whatsapp.phone_number_id');
+        if ($whatsappToken && $whatsappPhoneNumberId) {
+            $this->app->singleton(WhatsappApiInterface::class, function () use ($whatsappToken, $whatsappPhoneNumberId) {
+                return new WhatsappApi((string) $whatsappToken, (string) $whatsappPhoneNumberId);
             });
         }
 
@@ -130,6 +139,20 @@ class TextoServiceProvider extends PackageServiceProvider
                     ->connectTimeout($timeout);
 
                 return $client->baseUrl($base);
+            });
+        }
+        if (! Http::hasMacro('whatsapp')) {
+            Http::macro('whatsapp', function () {
+                $base = config('texto.whatsapp.base_url', 'https://graph.facebook.com/v25.0/');
+                $token = config('texto.whatsapp.access_token');
+                $timeout = (int) config('texto.whatsapp.timeout', 30);
+
+                return Http::withToken($token)
+                    ->acceptJson()
+                    ->asJson()
+                    ->timeout($timeout)
+                    ->connectTimeout($timeout)
+                    ->baseUrl($base);
             });
         }
         // Auto-schedule the status polling job so users do NOT need to add it manually to Console\Kernel.
