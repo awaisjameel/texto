@@ -9,7 +9,7 @@ Batteries included: queueing, retries, events, webhooks, polling, typed value ob
 [![Downloads](https://img.shields.io/packagist/dt/awaisjameel/texto.svg?style=flat-square)](https://packagist.org/packages/awaisjameel/texto)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE.md)
 
-Texto provides a unified, extensible Laravel package for carrier-grade SMS/MMS messaging. Built for Laravel 10–12 (PHP 7.4 / 8.1+), it abstracts provider complexities (Twilio, Telnyx) through consistent contracts and value objects, enabling seamless integration with enterprise messaging workflows.
+Texto provides a unified, extensible Laravel package for carrier-grade SMS/MMS and WhatsApp messaging. Built for Laravel 10–13 (PHP 8.1+), it abstracts provider complexities (Twilio, Telnyx, Meta's WhatsApp Cloud API) through consistent contracts and value objects, enabling seamless integration with enterprise messaging workflows.
 
 **Key Features:**
 
@@ -40,16 +40,20 @@ Texto provides a unified, extensible Laravel package for carrier-grade SMS/MMS m
 12. Status Polling (Adaptive Fallback)
 13. Retry & Backoff Strategy
 14. Twilio Conversations & Content Templates
-15. Extending / Custom Drivers
-16. Value Objects & Enums
+15. Overriding a Built‑in Driver
+16. API Reference (Value Objects, Enums, Events, Interfaces)
 17. Console Commands
 18. Testing, Fakes & Local Development
 19. Architecture Overview
 20. Troubleshooting & FAQ
-21. Roadmap
-22. Contributing
-23. Security Policy
-24. License & Credits
+21. Performance Considerations & Best Practices
+22. Roadmap
+23. Contributing
+24. Security Policy
+25. Migration Guide
+26. License & Credits
+
+Provider deep dives: [Twilio API reference](docs/twilio.md) · [Telnyx guide](docs/telnyx.md) · [WhatsApp Cloud API guide](docs/whatsapp.md)
 
 ---
 
@@ -74,7 +78,7 @@ The philosophy is simple: messaging should be a first-class citizen in your Lara
 
 ### Core Messaging
 
-- **SMS & MMS Support**: Send text messages and media attachments through Twilio and Telnyx
+- **SMS & MMS Support**: Send text messages and media attachments through Twilio and Telnyx, plus WhatsApp text/media/template messages via Meta's Cloud API
 - **Unified API**: Single `Texto::send()` method works across all providers
 - **Phone Number Validation**: Automatic E.164 formatting and validation using libphonenumber
 - **Media Handling**: Support for multiple media URLs per message
@@ -100,7 +104,7 @@ The philosophy is simple: messaging should be a first-class citizen in your Lara
 
 ### Security & Compliance
 
-- **Webhook Validation**: Signature verification for Twilio, shared secret headers
+- **Webhook Validation**: Cryptographic signature verification for Twilio (HMAC‑SHA1), Telnyx (Ed25519), and WhatsApp (HMAC‑SHA256)
 - **Rate Limiting**: Configurable per-minute limits on webhook endpoints
 - **Data Persistence**: Optional message storage with configurable retention
 
@@ -136,8 +140,8 @@ Texto::send('+15551234567', 'Hello world');
 
 Before installing Texto, ensure your Laravel application meets these requirements:
 
-- **Laravel**: 10.0, 11.0, or 12.0
-- **PHP**: 7.4 or higher (8.2+ recommended)
+- **Laravel**: 10.x, 11.x, 12.x, or 13.x
+- **PHP**: 8.1 or higher (8.2+ recommended)
 - **Database**: MySQL, PostgreSQL, SQLite, or SQL Server
 - **Queue System**: Any Laravel-supported queue driver (Database recommended for production)
 - **PHP Extensions**: `ext-sodium` for Telnyx signature verification
@@ -205,12 +209,13 @@ This will send a test message using your configured provider and settings.
 
 ```env
 # Core
-TEXTO_DRIVER=twilio                 # twilio | telnyx
+TEXTO_DRIVER=twilio                 # twilio | telnyx | whatsapp
 TEXTO_STORE_MESSAGES=true           # disable to skip DB persistence
 TEXTO_QUEUE=false                   # true => SendMessageJob async
 TEXTO_RETRY_ATTEMPTS=3
 TEXTO_RETRY_BACKOFF_START=200       # ms
 TEXTO_WEBHOOK_SECRET=               # optional shared secret header
+TEXTO_WEBHOOK_RATE_LIMIT=300        # webhook requests per minute per endpoint
 TEXTO_DEFAULT_REGION=US             # for parsing non-E.164 input
 
 # Status polling (optional)
@@ -228,14 +233,19 @@ TWILIO_FROM_NUMBER=+15550001111
 TWILIO_USE_CONVERSATIONS=true       # opt in to the classic Messages API by setting false (default: Conversations API)
 TWILIO_SMS_TEMPLATE_FRIENDLY_NAME=texto_sms_template
 TWILIO_MMS_TEMPLATE_FRIENDLY_NAME=texto_mms_template
+TWILIO_SMS_TEMPLATE_SID=            # optional HX... SID; skips template auto-discovery
+TWILIO_MMS_TEMPLATE_SID=            # optional HX... SID; skips template auto-discovery
 TWILIO_CONVERSATION_PREFIX=Texto
 TWILIO_CONVERSATION_WEBHOOK_URL=    # optional override
+TWILIO_CONVERSATION_CACHE_TTL=604800 # seconds a conversation SID is reused per (from, to); 0 disables
+TWILIO_HTTP_TIMEOUT=30              # seconds for outbound API calls
 
 # Telnyx
 TELNYX_API_KEY=...
 TELNYX_MESSAGING_PROFILE_ID=...
 TELNYX_FROM_NUMBER=+15550002222
 TELNYX_WEBHOOK_SECRET=base64-encoded-public-key
+TELNYX_WEBHOOK_TOLERANCE=300        # max webhook timestamp age in seconds
 TELNYX_HTTP_TIMEOUT=30              # seconds for outbound API calls
 
 # WhatsApp Cloud API
@@ -243,7 +253,8 @@ WHATSAPP_ACCESS_TOKEN=...
 WHATSAPP_PHONE_NUMBER_ID=...
 WHATSAPP_APP_SECRET=...
 WHATSAPP_VERIFY_TOKEN=...
-WHATSAPP_FROM_NUMBER=+15550003333 # local sender record only
+WHATSAPP_FROM_NUMBER=+15550003333   # local sender record only
+WHATSAPP_HTTP_TIMEOUT=30            # seconds for outbound API calls
 ```
 
 ---
@@ -254,12 +265,12 @@ After installation, you'll find the configuration file at `config/texto.php`. He
 
 ### Core Settings
 
-| Key              | Default    | Description                                          |
-| ---------------- | ---------- | ---------------------------------------------------- |
-| `driver`         | `'twilio'` | Active messaging provider (`'twilio'`, `'telnyx'`, or `'whatsapp'`) |
-| `store_messages` | `true`     | Whether to persist messages in the database          |
-| `queue`          | `false`    | Enable async message sending via Laravel queues      |
-| `default_region` | `'US'`     | Default region for phone number parsing              |
+| Key                 | Default    | Description                                          |
+| ------------------- | ---------- | ---------------------------------------------------- |
+| `driver`            | `'twilio'` | Active messaging provider (`'twilio'`, `'telnyx'`, or `'whatsapp'`) |
+| `store_messages`    | `true`     | Whether to persist messages in the database          |
+| `queue`             | `false`    | Enable async message sending via Laravel queues      |
+| `validation.region` | `'US'`     | Default region for parsing non‑E.164 phone numbers (`TEXTO_DEFAULT_REGION`) |
 
 ### Retry Configuration
 
@@ -315,29 +326,35 @@ Configures fallback polling for messages stuck in transient states:
     'auth_token' => env('TWILIO_AUTH_TOKEN'),
     'from_number' => env('TWILIO_FROM_NUMBER'),
     'use_conversations' => env('TWILIO_USE_CONVERSATIONS', true),
+    'timeout' => env('TWILIO_HTTP_TIMEOUT', 30),
     'sms_template_friendly_name' => env('TWILIO_SMS_TEMPLATE_FRIENDLY_NAME', 'texto_sms_template'),
     'mms_template_friendly_name' => env('TWILIO_MMS_TEMPLATE_FRIENDLY_NAME', 'texto_mms_template'),
+    // Optional explicit template SIDs (skip auto discovery/creation if provided)
+    'sms_template_sid' => env('TWILIO_SMS_TEMPLATE_SID'),
+    'mms_template_sid' => env('TWILIO_MMS_TEMPLATE_SID'),
     'conversation_prefix' => env('TWILIO_CONVERSATION_PREFIX', 'Texto'),
     'conversation_webhook_url' => env('TWILIO_CONVERSATION_WEBHOOK_URL'),
     'conversation_cache_ttl' => env('TWILIO_CONVERSATION_CACHE_TTL', 604800),
 ],
 ```
 
-Twilio-specific settings for both classic and Conversations API modes.
+Twilio-specific settings for both classic and Conversations API modes (the `base_urls` array pinning the Messaging, Conversations, and Content API hosts is also part of this block).
 
 ### Telnyx Configuration
 
 ```php
 'telnyx' => [
+    'base_url' => env('TELNYX_BASE_URL', 'https://api.telnyx.com/v2/'),
     'api_key' => env('TELNYX_API_KEY'),
     'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
     'from_number' => env('TELNYX_FROM_NUMBER'),
     'webhook_secret' => env('TELNYX_WEBHOOK_SECRET'),
+    'webhook_tolerance_seconds' => env('TELNYX_WEBHOOK_TOLERANCE', 300),
     'timeout' => env('TELNYX_HTTP_TIMEOUT', 30),
 ],
 ```
 
-Telnyx API credentials, messaging profile configuration, the base64-encoded public key used to verify webhook signatures, and a transport timeout (seconds) for outbound REST calls.
+Telnyx API credentials, messaging profile configuration, the base64-encoded Ed25519 public key used to verify webhook signatures, the maximum accepted webhook timestamp age, and a transport timeout (seconds) for outbound REST calls.
 
 ### WhatsApp Configuration
 
@@ -508,7 +525,7 @@ $phones = [
     '+1-555-123-4567',     // US format
     '555.123.4567',        // Local format (uses config region)
     '+44 20 7123 4567',    // UK format
-    '0912345678',          // Indian format
+    '0912345678',          // National format (parsed with config region)
 ];
 
 foreach ($phones as $phone) {
@@ -554,11 +571,11 @@ Table: `texto_messages`
 | Column                                    | Notes                                                                                        |
 | ----------------------------------------- | -------------------------------------------------------------------------------------------- |
 | direction                                 | `sent` / `received`                                                                          |
-| driver                                    | `twilio` / `telnyx`                                                                          |
+| driver                                    | `twilio` / `telnyx` / `whatsapp`                                                             |
 | from_number / to_number                   | E.164 formatted                                                                              |
 | body                                      | Nullable for pure media inbound                                                              |
 | media_urls                                | JSON array                                                                                   |
-| status                                    | Normalized enum (queued, sending, sent, delivered, failed, undelivered, received, ambiguous) |
+| status                                    | Normalized enum (queued, sending, sent, delivered, read, received, failed, undelivered, ambiguous) |
 | provider_message_id                       | SID / Telnyx ID (nullable until known)                                                       |
 | error_code                                | Provider error (if any)                                                                      |
 | segments_count                            | (Telnyx) part count                                                                          |
@@ -572,19 +589,19 @@ Table: `texto_messages`
 
 ## 10. Webhooks
 
-Auto‑registered routes (POST):
+Auto‑registered routes:
 
-| Purpose | Twilio                                  | Telnyx                                  |
-| ------- | --------------------------------------- | --------------------------------------- |
-| Inbound | `/texto/webhook/twilio`                 | `/texto/webhook/telnyx`                 |
-| Status  | `/texto/webhook/twilio` (same endpoint) | `/texto/webhook/telnyx` (same endpoint) |
+| Provider | Endpoint | Methods |
+| -------- | -------- | ------- |
+| Twilio   | `/texto/webhook/twilio`   | POST (inbound + status) |
+| Telnyx   | `/texto/webhook/telnyx`   | POST (inbound + status) |
+| WhatsApp | `/texto/webhook/whatsapp` | GET (Meta subscription verify handshake) + POST (inbound + status, batched) |
 
-Both providers now publish inbound and status callbacks to a **single endpoint**. Texto inspects each payload to determine whether it is an inbound message or a delivery status update, ensuring identical processing for Twilio and Telnyx.
+Each provider publishes inbound and status callbacks to a **single endpoint**. Texto inspects each payload to determine whether it is an inbound message or a delivery status update, ensuring identical processing across providers. WhatsApp webhooks arrive batched; every entry in the batch is processed individually.
 
-Each request passes through:
+Twilio Conversations events authored by your own configured `from_number` (the echo of a message Texto itself sent) are recognized as authentic and intentionally ignored, so outbound messages are never re‑recorded as inbound.
 
-1. `VerifyTextoWebhookSecret` – matches `X-Texto-Secret` (if configured).
-2. `RateLimitTextoWebhook` – per‑minute throttle (`webhook.rate_limit`).
+Each request passes through `RateLimitTextoWebhook` – a per‑minute throttle (`webhook.rate_limit`). Authenticity is enforced by each provider's cryptographic signature inside the handler (Twilio `X-Twilio-Signature`, Telnyx Ed25519, Meta `X-Hub-Signature-256`). The `VerifyTextoWebhookSecret` middleware (`X-Texto-Secret` header, `TEXTO_WEBHOOK_SECRET`) is **not** attached to these routes — providers cannot send custom headers — it is shipped for guarding your own application‑defined endpoints.
 
 Inbound payloads are normalized into `WebhookProcessingResult` then persisted via `EloquentMessageRepository`.
 
@@ -594,11 +611,14 @@ Inbound payloads are normalized into `WebhookProcessingResult` then persisted vi
 
 | Mechanism            | Description                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------------ |
-| Twilio Signature     | Validated via`RequestValidator` unless `TEXTO_TESTING_SKIP_WEBHOOK_VALIDATION` in testing. |
-| Telnyx Signature     | Validated via Ed25519 signature (Telnyx public webhook key, sodium required).              |
-| Shared Secret Header | Add`TEXTO_WEBHOOK_SECRET` and send header `X-Texto-Secret`.                                |
-| Rate Limiting        | Middleware prevents abuse of webhook endpoints.                                            |
+| Twilio Signature     | `X-Twilio-Signature` validated (HMAC‑SHA1 over the full public URL + sorted POST params). Behind a TLS‑terminating proxy, configure `TrustProxies` so the public URL is reconstructed. |
+| Telnyx Signature     | Ed25519 signature validated against the Telnyx public webhook key (`ext-sodium`), with timestamp tolerance (`TELNYX_WEBHOOK_TOLERANCE`). |
+| WhatsApp Signature   | Meta's `X-Hub-Signature-256` (HMAC‑SHA256 of the raw body with `WHATSAPP_APP_SECRET`) validated; GET verify handshake uses `WHATSAPP_VERIFY_TOKEN`. |
+| Shared Secret Header | `VerifyTextoWebhookSecret` middleware checks `X-Texto-Secret` against `TEXTO_WEBHOOK_SECRET` — for your own endpoints, not the packaged provider routes. |
+| Rate Limiting        | `RateLimitTextoWebhook` throttles every packaged webhook endpoint per minute.              |
 | Phone Parsing        | All numbers canonicalized using libphonenumber.                                            |
+
+Signature validation can be skipped in test environments via `TEXTO_TESTING_SKIP_WEBHOOK_VALIDATION=true`.
 
 ---
 
@@ -660,7 +680,7 @@ No behavioral change is required for production usage; failures still fall back 
 
 ## 15. Overriding a Built‑in Driver
 
-`extend()` swaps the sender used for an existing built‑in driver (`twilio` or `telnyx`). The name
+`extend()` swaps the sender used for an existing built‑in driver (`twilio`, `telnyx`, or `whatsapp`). The name
 **must** match a recognized `Driver` enum value — extending an unknown name throws a
 `TextoException`. To add a genuinely new provider, add a `Driver` enum case (see below), not `extend()`.
 
@@ -703,7 +723,7 @@ new provider cannot be resolved until its enum case exists. Contributing it back
 
 ---
 
-## API Reference
+## 16. API Reference
 
 ### Texto Facade
 
@@ -723,7 +743,7 @@ Send an SMS or MMS message.
 
 - `media_urls` (array): Array of media URLs for MMS
 - `from` (string): Override sender number
-- `driver` (string): Override provider ('twilio' or 'telnyx')
+- `driver` (string): Override provider ('twilio', 'telnyx', or 'whatsapp')
 - `metadata` (array): Custom metadata to store with message
 - `driver_config` (array): Optional provider configuration snapshot (API keys, messaging profile IDs, etc.) that temporarily overrides `config('texto.{driver}')` for this send; primarily used by queued jobs or multi-tenant flows.
 
@@ -819,6 +839,7 @@ enum MessageStatus: string
     case Sending = 'sending';    // Message being sent
     case Sent = 'sent';          // Message sent successfully
     case Delivered = 'delivered'; // Message delivered to recipient
+    case Read = 'read';          // Read by recipient (WhatsApp; terminal)
     case Received = 'received';  // Inbound message received
     case Failed = 'failed';      // Send failed permanently
     case Undelivered = 'undelivered'; // Message undelivered
@@ -835,6 +856,7 @@ enum Driver: string
 {
     case Twilio = 'twilio';
     case Telnyx = 'telnyx';
+    case Whatsapp = 'whatsapp';
 }
 ```
 
@@ -876,7 +898,7 @@ class MessageReceived
 
 #### MessageStatusUpdated
 
-Fired when a message status is updated via webhook or polling.
+Fired when a stored message's status advances via a provider status webhook.
 
 ```php
 class MessageStatusUpdated
@@ -979,7 +1001,6 @@ Send a test message.
 | ------------------------------ | ------------------------------------------------- |
 | `texto:install`                | Publish config + migration then run migrate.      |
 | `texto:test-send {to} {body?}` | Fire a manual test message (optional`--driver=`). |
-| `texto`                        | Placeholder sample command.                       |
 
 ---
 
@@ -1011,7 +1032,7 @@ composer test
 | ------------------------------------------------------- | ----------------------------------------------------------------- |
 | `Texto` facade/root                                     | Orchestrates send workflow, queue placeholder creation, events.   |
 | `DriverManager`                                         | Resolves concrete sender implementation (built‑ins + extensions). |
-| Drivers (`TwilioSender`, `TelnyxSender`)                | Provider API invocation + provider‑specific metadata enrichment.  |
+| Drivers (`TwilioSender`, `TelnyxSender`, `WhatsappSender`) | Provider API invocation + provider‑specific metadata enrichment. Each constructs its own API adapters from its config. |
 | `StatusMapper`                                          | Converts raw provider statuses / events to internal enum.         |
 | `EloquentMessageRepository`                             | Persistence & deterministic queued upgrade + polling updates.     |
 | Jobs (`SendMessageJob`, `StatusPollJob`)                | Async send & periodic status reconciliation.                      |
@@ -1040,9 +1061,9 @@ A: This usually indicates queue processing issues.
 A: Signature validation ensures webhook authenticity.
 
 - For Twilio: Verify `TWILIO_AUTH_TOKEN` matches your Twilio console
-- Ensure webhook URLs in provider console exactly match your routes (including protocol)
+- Ensure webhook URLs in provider console exactly match your routes (including protocol; query strings are supported)
+- Behind a TLS‑terminating proxy or load balancer, configure Laravel's `TrustProxies` middleware so the public `https://` URL is reconstructed for signature checks
 - For local development, use ngrok or similar tunneling service
-- Check that webhook URLs don't have trailing slashes or query parameters
 
 **Q: Twilio Conversations template creation warnings**
 A: Template auto-provisioning may fail due to permissions.
@@ -1164,7 +1185,7 @@ A: Webhooks require public URLs for provider access.
 ### Extending Texto
 
 **Q: Adding a new provider (e.g., Vonage)**
-A: `extend()` only overrides the senders of built‑in drivers (`twilio`, `telnyx`); passing an
+A: `extend()` only overrides the senders of built‑in drivers (`twilio`, `telnyx`, `whatsapp`); passing an
 unrecognized name (such as `'vonage'`) throws a `TextoException`. A genuinely new provider needs its
 own `Driver` enum case so the manager can resolve it:
 
@@ -1428,28 +1449,9 @@ We welcome contributions! Areas of particular interest:
 
 | Texto Version | Laravel Version | PHP Version | Status |
 | ------------- | --------------- | ----------- | ------ |
-| 1.x           | 10.0 - 12.x     | 7.4 - 8.2   | Active |
+| 1.x           | 10.x - 13.x     | 8.1+        | Active |
 
-### Migration Guide
-
-#### Upgrading from 1.0 to 1.1
-
-No breaking changes. New features:
-
-- Enhanced status polling with configurable backoff
-- Improved error handling and logging
-- Additional metadata fields for cost tracking
-
-#### Future Breaking Changes (2.0)
-
-Planned improvements that may require migration:
-
-- Updated configuration structure
-- New required environment variables
-- Changes to event payloads
-- Database schema updates
-
-Monitor release notes for detailed migration instructions.
+See the [Migration Guide](#25-migration-guide) below and [CHANGELOG.md](CHANGELOG.md) for upgrade notes.
 
 ---
 
@@ -1502,7 +1504,7 @@ composer format
     - Inline code documentation (PHPDoc)
     - CHANGELOG.md for version history
 
-5. **Type Safety**: Keep new public APIs strongly typed using PHP 7.4+ features.
+5. **Type Safety**: Keep new public APIs strongly typed using PHP 8.1+ features (enums, readonly properties, constructor promotion).
 
 ### Code Style
 
@@ -1590,7 +1592,6 @@ test('message sending workflow', function () {
 
 - **Discussions**: Use GitHub Discussions for questions and ideas
 - **Issues**: Report bugs and request features via GitHub Issues
-- **Discord/Slack**: Join our community chat for real-time help
 
 ### Recognition
 
@@ -1604,15 +1605,19 @@ Thank you for contributing to Texto! 🎉
 
 ---
 
-## 23. Security Policy
+## 24. Security Policy
 
 Report vulnerabilities privately via GitHub Security Advisories. Do not disclose publicly until patched. Avoid sharing live credentials or full raw webhook payloads containing PII in issues.
 
 ---
 
-## 24. Migration Guide
+## 25. Migration Guide
 
 ### Upgrading Versions
+
+#### Unreleased (next version)
+
+**Breaking:** the low-level provider API adapters (`TwilioMessagingApiInterface`, `TelnyxMessagingApiInterface`, `WhatsappApiInterface`, …) are no longer bound in the service container. If you resolved them via `app(...)`, construct them directly with the credentials they should use (e.g. `new TelnyxMessagingApi($apiKey)`), or inject a custom implementation through the sender constructors (`new TwilioSender($config, $fakeMessagingApi)`). See [CHANGELOG.md](CHANGELOG.md) for the full list of changes.
 
 #### From 1.0.x to 1.1.x
 
@@ -1708,7 +1713,7 @@ Update your tests to use the new `FakeSender`:
 app(DriverManagerInterface::class)->extend('twilio', fn() => new FakeSender());
 ```
 
-## 25. License & Credits
+## 26. License & Credits
 
 ### License
 
@@ -1787,7 +1792,6 @@ Event::listen(MessageSent::class, function ($event) {
 - 📖 **Documentation**: You're reading it! Check the [GitHub repository](https://github.com/awaisjameel/texto) for the latest updates
 - 🐛 **Bug Reports**: [Open an issue](https://github.com/awaisjameel/texto/issues) on GitHub
 - 💡 **Feature Requests**: [Start a discussion](https://github.com/awaisjameel/texto/discussions) on GitHub
-- 💬 **Community Chat**: Join our [Discord server](https://discord.gg/texto) for real-time help
 - ⭐ **Show Support**: Star the repo if Texto saves you time and effort!
 
 ---
