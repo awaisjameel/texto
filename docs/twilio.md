@@ -1,3 +1,5 @@
+> **Scope of this document:** this is a raw Twilio API reference for the Messaging, Conversations, and Content Templates endpoints that Texto's Twilio driver uses. For the package's own behavior — Conversations-by-default sending, conversation SID caching, content template auto-provisioning, and the built-in `/texto/webhook/twilio` endpoint with signature validation — see [README section 14](../README.md#14-twilio-conversations--content-templates).
+
 ### Key Points
 
 -   Twilio's Messaging API enables sending SMS and MMS messages via REST endpoints, supporting features like status callbacks, media attachments, and content templates for enhanced delivery.
@@ -85,17 +87,23 @@ The Messaging API handles outbound and inbound SMS/MMS via the Message resource.
 
 -   **PHP/Laravel Example** (Send MMS with Media):
 
+    > ⚠️ **Array form parameters must repeat the bare key** (`MediaUrl=a&MediaUrl=b`). Laravel's `asForm()` runs arrays through `http_build_query`, producing `MediaUrl[0]=a&MediaUrl[1]=b`, which Twilio ignores. Build the body manually for array parameters (this is what Texto's adapters do):
+
     ```php
     use Illuminate\Support\Facades\Http;
 
+    $form = http_build_query([
+        'To' => '+15558675310',
+        'From' => '+15017122661',
+        'Body' => 'Check this out!',
+    ], '', '&', PHP_QUERY_RFC3986);
+    foreach (['https://example.com/image.jpg', 'https://example.com/video.mp4'] as $url) {
+        $form .= '&MediaUrl=' . rawurlencode($url);
+    }
+
     $response = Http::withBasicAuth(env('TWILIO_ACCOUNT_SID'), env('TWILIO_AUTH_TOKEN'))
-        ->asForm()
-        ->post('https://api.twilio.com/2010-04-01/Accounts/' . env('TWILIO_ACCOUNT_SID') . '/Messages.json', [
-            'To' => '+15558675310',
-            'From' => '+15017122661',
-            'Body' => 'Check this out!',
-            'MediaUrl' => ['https://example.com/image.jpg', 'https://example.com/video.mp4'],
-        ]);
+        ->withBody($form, 'application/x-www-form-urlencoded')
+        ->post('https://api.twilio.com/2010-04-01/Accounts/' . env('TWILIO_ACCOUNT_SID') . '/Messages.json');
     ```
 
 -   **Response Example** (JSON, 201 Created):
@@ -204,7 +212,9 @@ The Messaging API handles outbound and inbound SMS/MMS via the Message resource.
 
 ##### Status Callbacks
 
-Twilio POSTs to your `StatusCallback` URL with parameters like `MessageStatus` (e.g., `delivered`), `ErrorCode`. In Laravel, handle via a route/controller:
+Twilio POSTs to your `StatusCallback` URL with parameters like `MessageStatus` (e.g., `delivered`), `ErrorCode`.
+
+Texto already ships this: point `StatusCallback` at `/texto/webhook/twilio` (on the classic Messages path, pass it per send via `metadata['webhook_url']`) and the packaged route validates the `X-Twilio-Signature` header — HMAC-SHA1 over the full public URL plus the alphabetically sorted POST parameters — without the Twilio SDK. If you handle callbacks yourself instead:
 
 ```php
 // routes/web.php
@@ -212,7 +222,7 @@ Route::post('/twilio/status', 'TwilioController@handleStatus');
 
 // TwilioController.php
 public function handleStatus(Request $request) {
-    // Validate signature (use Twilio\RequestValidator)
+    // Validate the X-Twilio-Signature header before trusting the payload.
     $status = $request->input('MessageStatus');
     // Log or process status
 }
@@ -367,17 +377,23 @@ Scoped webhooks are conversation-specific, supporting post-events only (e.g., `o
 
 -   **PHP/Laravel Example**:
 
+    > ⚠️ `Configuration.Filters` (and `Configuration.Triggers`) must be sent as **repeated form fields** (`Configuration.Filters=onMessageAdded&Configuration.Filters=onParticipantAdded`). Twilio ignores both comma-joined values and PHP's bracketed array encoding, silently leaving the webhook without working event filters — so build the body manually instead of using `asForm()` with an array:
+
     ```php
     use Illuminate\Support\Facades\Http;
 
+    $form = http_build_query([
+        'Target' => 'webhook',
+        'Configuration.Url' => 'https://yourapp.com/webhook',
+        'Configuration.Method' => 'POST',
+    ], '', '&', PHP_QUERY_RFC3986);
+    foreach (['onMessageAdded', 'onParticipantAdded'] as $filter) {
+        $form .= '&Configuration.Filters=' . rawurlencode($filter);
+    }
+
     $response = Http::withBasicAuth(env('TWILIO_ACCOUNT_SID'), env('TWILIO_AUTH_TOKEN'))
-        ->asForm()
-        ->post('https://conversations.twilio.com/v1/Conversations/CHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/Webhooks', [
-            'Target' => 'webhook',
-            'Configuration.Url' => 'https://yourapp.com/webhook',
-            'Configuration.Method' => 'POST',
-            'Configuration.Filters' => ['onMessageAdded', 'onParticipantAdded'],
-        ]);
+        ->withBody($form, 'application/x-www-form-urlencoded')
+        ->post('https://conversations.twilio.com/v1/Conversations/CHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/Webhooks');
     ```
 
 -   **Response Example**: Includes `sid`, `target`, `configuration`.

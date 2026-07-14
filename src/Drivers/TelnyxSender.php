@@ -11,6 +11,7 @@ use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Exceptions\TelnyxApiException;
+use Awaisjameel\Texto\Exceptions\TelnyxApiRateLimitException;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Support\Retry;
 use Awaisjameel\Texto\Support\StatusMapper;
@@ -29,9 +30,7 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
         if (! $apiKey) {
             throw new TextoSendFailedException('Telnyx API key missing.');
         }
-        $this->messagingApi = $messagingApi ?? (app()->bound(TelnyxMessagingApiInterface::class)
-            ? app(TelnyxMessagingApiInterface::class)
-            : new TelnyxMessagingApi($apiKey));
+        $this->messagingApi = $messagingApi ?? new TelnyxMessagingApi($apiKey);
     }
 
     /**
@@ -48,11 +47,16 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
         $webhookUrl = $metadata['webhook_url'] ?? null;
 
         try {
-            $data = Retry::exponential(function () use ($to, $fromNumber, $body, $mediaUrls, $profileId, $webhookUrl) {
-                $options = ['messaging_profile_id' => $profileId] + ($webhookUrl ? ['webhook_url' => $webhookUrl] : []);
+            $data = Retry::exponential(
+                function () use ($to, $fromNumber, $body, $mediaUrls, $profileId, $webhookUrl) {
+                    $options = ['messaging_profile_id' => $profileId] + ($webhookUrl ? ['webhook_url' => $webhookUrl] : []);
 
-                return $this->messagingApi->sendMessage($to->e164, $fromNumber, $body, $mediaUrls, $options);
-            }, (int) config('texto.retry.max_attempts', 3), (int) config('texto.retry.backoff_start_ms', 200));
+                    return $this->messagingApi->sendMessage($to->e164, $fromNumber, $body, $mediaUrls, $options);
+                },
+                (int) config('texto.retry.max_attempts', 3),
+                (int) config('texto.retry.backoff_start_ms', 200),
+                fn (\Throwable $error): bool => $error instanceof TelnyxApiRateLimitException,
+            );
         } catch (TelnyxApiException $e) {
             Log::error('Texto Telnyx API send failed', ['error' => $e->getMessage(), 'status' => $e->status, 'code' => $e->telnyxCode, 'context' => $e->context]);
             throw new TextoSendFailedException('Telnyx API send failed: '.$e->getMessage(), 0, $e);

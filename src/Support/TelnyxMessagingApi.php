@@ -10,12 +10,18 @@ use Awaisjameel\Texto\Exceptions\TelnyxApiException;
 use Awaisjameel\Texto\Exceptions\TelnyxApiNotFoundException;
 use Awaisjameel\Texto\Exceptions\TelnyxApiRateLimitException;
 use Awaisjameel\Texto\Exceptions\TelnyxApiValidationException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class TelnyxMessagingApi implements TelnyxMessagingApiInterface
 {
     public function __construct(protected string $apiKey) {}
+
+    protected function http(): PendingRequest
+    {
+        return Http::telnyx()->withToken($this->apiKey);
+    }
 
     public function sendMessage(string $to, string $from, string $body, array $mediaUrls = [], array $options = []): array
     {
@@ -30,14 +36,14 @@ class TelnyxMessagingApi implements TelnyxMessagingApiInterface
         if ($mediaUrls) {
             $payload['media_urls'] = $mediaUrls;
         }
-        $resp = Http::telnyx()->post('messages', $payload);
+        $resp = $this->http()->post('messages', $payload);
 
         return $this->handle($resp, 'sendMessage', ['to' => $to]);
     }
 
     public function fetchMessage(string $messageId): array
     {
-        $resp = Http::telnyx()->get('messages/'.$messageId);
+        $resp = $this->http()->get('messages/'.$messageId);
 
         return $this->handle($resp, 'fetchMessage', ['id' => $messageId]);
     }

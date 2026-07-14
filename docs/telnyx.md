@@ -1,6 +1,6 @@
 ### Key Points
 
-> Adapter Architecture Update (Texto vNext): Telnyx integration now mirrors the Twilio refactor – all REST calls flow through the `TelnyxMessagingApiInterface` adapter resolved from the container. The `TelnyxSender` composes this adapter, extracts normalized status/cost metadata, and applies unified retry/backoff + exception mapping. HTTP calls use the `Http::telnyx()` macro defined in `TextoServiceProvider`, providing a preconfigured base URL, token auth, JSON headers, and timeout. Errors map to typed exceptions: `TelnyxApiAuthException`, `TelnyxApiRateLimitException`, `TelnyxApiValidationException`, `TelnyxApiNotFoundException`, falling back to `TelnyxApiException`.
+> Adapter Architecture: all Telnyx REST calls flow through the `TelnyxMessagingApiInterface` adapter. `TelnyxSender` constructs the adapter from its own configuration (the adapter is deliberately **not** bound in the container — a boot-time singleton would keep serving stale or another tenant's credentials under per-send `driver_config` overrides). The sender extracts normalized status/cost metadata and applies unified retry/backoff + exception mapping. HTTP calls use the `Http::telnyx()` macro defined in `TextoServiceProvider` (preconfigured base URL, JSON headers, timeout), and the adapter authenticates each request with its own API key. Errors map to typed exceptions: `TelnyxApiAuthException`, `TelnyxApiRateLimitException`, `TelnyxApiValidationException`, `TelnyxApiNotFoundException`, falling back to `TelnyxApiException`.
 
 #### Quick Usage
 
@@ -8,12 +8,15 @@
 // Resolve sender (package auto-selects Telnyx via config('texto.driver') === 'telnyx')
 $result = \Texto::send('+15551230000', 'Hello world');
 
-// Adapter direct (advanced scenarios)
-$api = app(\Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface::class);
+// Adapter direct (advanced scenarios) — construct it with the API key it should use
+$api = new \Awaisjameel\Texto\Support\TelnyxMessagingApi(config('texto.telnyx.api_key'));
 $data = $api->sendMessage('+15551230000', '+15557778888', 'Hello', [], [
     'messaging_profile_id' => config('texto.telnyx.messaging_profile_id'),
     'webhook_url' => 'https://example.com/webhooks/telnyx',
 ]);
+
+// Testing: inject a fake adapter through the sender constructor
+$sender = new \Awaisjameel\Texto\Drivers\TelnyxSender(config('texto.telnyx'), $fakeMessagingApi);
 ```
 
 #### Exception Mapping
@@ -57,7 +60,7 @@ class SmsController extends Controller
         ];
 
         try {
-            $response = Http::baseUrl(config('texto.telnyx.base_uri'))
+            $response = Http::baseUrl(config('texto.telnyx.base_url'))
                 ->withToken(config('texto.telnyx.api_key'))
                 ->acceptJson()
                 ->post('messages', $payload)
@@ -136,15 +139,15 @@ Telnyx mandates Bearer auth for all calls. Generate keys in the Portal (no scope
 
 ```php
 // config/texto.php (telnyx section)
-return [
+'telnyx' => [
+    'base_url' => env('TELNYX_BASE_URL', 'https://api.telnyx.com/v2/'),
     'api_key' => env('TELNYX_API_KEY'),
     'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
     'from_number' => env('TELNYX_FROM_NUMBER'),
     'webhook_secret' => env('TELNYX_WEBHOOK_SECRET'), // Base64-encoded ED25519 public key
-    'base_uri' => env('TELNYX_BASE_URI', 'https://api.telnyx.com/v2/'),
-    'timeout' => (float) env('TELNYX_TIMEOUT', 10),
-    'connect_timeout' => (float) env('TELNYX_CONNECT_TIMEOUT', 5),
-];
+    'webhook_tolerance_seconds' => env('TELNYX_WEBHOOK_TOLERANCE', 300),
+    'timeout' => env('TELNYX_HTTP_TIMEOUT', 30), // seconds, also used as connect timeout
+],
 ```
 
 Load via `config('texto.telnyx.api_key')`. Best practices: Encrypt in `.env`, use Laravel Vault for prod, handle 401/403 with retries. No OAuth—simple token suits server-to-server.
@@ -205,7 +208,7 @@ class TelnyxService
         ];
 
         try {
-            return Http::baseUrl(config('texto.telnyx.base_uri'))
+            return Http::baseUrl(config('texto.telnyx.base_url'))
                 ->withToken($this->apiKey)
                 ->acceptJson()
                 ->throw()
@@ -219,7 +222,7 @@ class TelnyxService
 
     public function getMessage(string $id): array
     {
-        return Http::baseUrl(config('texto.telnyx.base_uri'))
+        return Http::baseUrl(config('texto.telnyx.base_url'))
             ->withToken($this->apiKey)
             ->acceptJson()
             ->throw()

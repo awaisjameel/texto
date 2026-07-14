@@ -51,13 +51,20 @@ Text supports `metadata.preview_url`. Media types are inferred from URL extensio
 
 ## Webhooks and media
 
-Inbound media is persisted as `whatsapp-media://{media-id}` rather than downloaded. Resolve it when needed with the adapter:
+Inbound media is persisted as `whatsapp-media://{media-id}` rather than downloaded. Resolve it when needed by constructing the adapter with the credentials it should use (adapters are deliberately not bound in the container, so per-tenant credentials never leak between sends):
 
 ```php
-$media = app(\Awaisjameel\Texto\Contracts\WhatsappApiInterface::class)
-    ->getMediaUrl($mediaId);
+use Awaisjameel\Texto\Support\WhatsappApi;
+
+$api = new WhatsappApi(
+    config('texto.whatsapp.access_token'),
+    config('texto.whatsapp.phone_number_id'),
+);
+$media = $api->getMediaUrl($mediaId);
 // $media['url'] is authenticated and expires in roughly five minutes.
 ```
+
+For tests, inject a fake through the sender constructor: `new WhatsappSender($config, $fakeApi)`.
 
 The driver receives delivery events through webhooks only; it does not poll statuses. `read` is preserved as its own terminal local status.
 

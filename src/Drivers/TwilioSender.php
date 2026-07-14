@@ -14,6 +14,7 @@ use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Exceptions\TwilioApiException;
+use Awaisjameel\Texto\Exceptions\TwilioApiRateLimitException;
 use Awaisjameel\Texto\Support\Retry;
 use Awaisjameel\Texto\Support\StatusMapper;
 use Awaisjameel\Texto\Support\TwilioContentApi;
@@ -21,10 +22,17 @@ use Awaisjameel\Texto\Support\TwilioConversationsApi;
 use Awaisjameel\Texto\Support\TwilioMessagingApi;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class TwilioSender implements MessageSenderInterface, PollableMessageSenderInterface
 {
+    protected const TEMPLATE_BODY_SEGMENTS = 5;
+
+    protected const TEMPLATE_BODY_SEGMENT_CHARS = 100;
+
+    protected const TEMPLATE_BODY_MAX_CHARS = self::TEMPLATE_BODY_SEGMENTS * self::TEMPLATE_BODY_SEGMENT_CHARS;
+
     protected TwilioMessagingApiInterface $messagingApi;
 
     protected TwilioConversationsApiInterface $conversationsApi;
@@ -35,22 +43,20 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
 
     protected ?string $mmsTemplateSid = null;
 
-    public function __construct(protected array $config)
-    {
+    public function __construct(
+        protected array $config,
+        ?TwilioMessagingApiInterface $messagingApi = null,
+        ?TwilioConversationsApiInterface $conversationsApi = null,
+        ?TwilioContentApiInterface $contentApi = null,
+    ) {
         $sid = $config['account_sid'] ?? null;
         $token = $config['auth_token'] ?? null;
         if (! $sid || ! $token) {
             throw new TextoSendFailedException('Twilio credentials missing.');
         }
-        $this->messagingApi = app()->bound(TwilioMessagingApiInterface::class)
-            ? app(TwilioMessagingApiInterface::class)
-            : new TwilioMessagingApi($sid, $token);
-        $this->conversationsApi = app()->bound(TwilioConversationsApiInterface::class)
-            ? app(TwilioConversationsApiInterface::class)
-            : new TwilioConversationsApi($sid, $token);
-        $this->contentApi = app()->bound(TwilioContentApiInterface::class)
-            ? app(TwilioContentApiInterface::class)
-            : new TwilioContentApi($sid, $token);
+        $this->messagingApi = $messagingApi ?? new TwilioMessagingApi($sid, $token);
+        $this->conversationsApi = $conversationsApi ?? new TwilioConversationsApi($sid, $token);
+        $this->contentApi = $contentApi ?? new TwilioContentApi($sid, $token);
     }
 
     /**
@@ -80,16 +86,24 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
             return $this->sendViaConversations($to, $body, $fromNumber, $mediaUrls, $metadata);
         }
 
+        $webhookUrl = $metadata['webhook_url'] ?? null;
+        $options = is_string($webhookUrl) && $webhookUrl !== '' ? ['StatusCallback' => $webhookUrl] : [];
+
         try {
-            $raw = Retry::exponential(function () use ($to, $fromNumber, $body, $mediaUrls) {
-                return $this->messagingApi->sendMessage(
-                    $to->e164,
-                    $fromNumber,
-                    $body,
-                    $mediaUrls,
-                    []
-                );
-            }, (int) config('texto.retry.max_attempts', 3), (int) config('texto.retry.backoff_start_ms', 200));
+            $raw = Retry::exponential(
+                function () use ($to, $fromNumber, $body, $mediaUrls, $options) {
+                    return $this->messagingApi->sendMessage(
+                        $to->e164,
+                        $fromNumber,
+                        $body,
+                        $mediaUrls,
+                        $options
+                    );
+                },
+                (int) config('texto.retry.max_attempts', 3),
+                (int) config('texto.retry.backoff_start_ms', 200),
+                fn (\Throwable $error): bool => $error instanceof TwilioApiRateLimitException,
+            );
         } catch (TwilioApiException $e) {
             Log::error('Texto Twilio (legacy REST) send failed', ['error' => $e->getMessage(), 'status' => $e->status, 'code' => $e->twilioCode]);
             throw new TextoSendFailedException('Twilio send failed: '.$e->getMessage());
@@ -132,6 +146,75 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
 
         $this->initializeTemplates();
 
+        $mediaUrl = $mediaUrls[0] ?? null;
+        $contentSid = $mediaUrl ? $this->mmsTemplateSid : $this->smsTemplateSid;
+        $bodyFitsTemplate = mb_strlen($body) <= self::TEMPLATE_BODY_MAX_CHARS;
+        if ($mediaUrl !== null && $contentSid !== null && ! $bodyFitsTemplate) {
+            throw new TextoSendFailedException(sprintf(
+                'Twilio MMS via content template supports bodies up to %d characters (got %d); shorten the body or send the text separately.',
+                self::TEMPLATE_BODY_MAX_CHARS,
+                mb_strlen($body),
+            ));
+        }
+        $useContentTemplate = $contentSid !== null && $bodyFitsTemplate;
+
+        // Reuse the conversation from a previous send to this (from, to) pair when one is
+        // cached: the full setup flow costs 4-6 API calls per send, while a reused
+        // conversation only needs the message POST. Participants and the webhook were
+        // already configured when the conversation was first used.
+        $cacheKey = $this->conversationCacheKey($to->e164, $fromNumber);
+        $cacheTtl = (int) ($this->config['conversation_cache_ttl'] ?? 604800);
+        $cachedSid = $cacheTtl > 0 ? Cache::get($cacheKey) : null;
+        if (is_string($cachedSid) && $cachedSid !== '') {
+            try {
+                // A per-send webhook override must take effect even on a reused conversation.
+                $webhookSid = isset($metadata['webhook_url'])
+                    ? $this->attachConversationWebhook($cachedSid, (string) $metadata['webhook_url'])
+                    : null;
+
+                return $this->deliverConversationMessage($cachedSid, true, $webhookSid, $to, $body, $fromNumber, $mediaUrls, $metadata, $useContentTemplate, $contentSid);
+            } catch (TwilioApiException|TextoSendFailedException $e) {
+                // The cached conversation may have been closed or deleted since it was
+                // stored; drop it and run the full setup flow once before giving up.
+                Cache::forget($cacheKey);
+                Log::info('Cached Twilio Conversation unusable; creating a fresh one.', ['conversation_sid' => $cachedSid, 'to' => $to->e164, 'error' => $e->getMessage()]);
+            }
+        }
+
+        [$conversationSid, $reusedConversation] = $this->resolveConversation($to, $fromNumber);
+
+        // Metadata webhook_url overrides the configured default.
+        $webhookUrl = $metadata['webhook_url'] ?? ($this->config['conversation_webhook_url'] ?? null);
+        $webhookSid = $webhookUrl ? $this->attachConversationWebhook($conversationSid, $webhookUrl) : null;
+
+        try {
+            $result = $this->deliverConversationMessage($conversationSid, $reusedConversation, $webhookSid, $to, $body, $fromNumber, $mediaUrls, $metadata, $useContentTemplate, $contentSid);
+        } catch (\Throwable $e) {
+            if (! $reusedConversation) {
+                // Nothing was delivered into the conversation we just created; delete it
+                // (best-effort) so a failed send does not leave an orphan behind.
+                $this->deleteConversationSilently($conversationSid);
+            }
+            throw $e;
+        }
+
+        if ($cacheTtl > 0) {
+            Cache::put($cacheKey, $conversationSid, now()->addSeconds($cacheTtl));
+        }
+
+        return $result;
+    }
+
+    /**
+     * Create the conversation for a recipient, recovering via Twilio's duplicate-binding
+     * error (code 50416) when the participant already belongs to one.
+     *
+     * @return array{string, bool} The conversation SID and whether an existing conversation was reused.
+     *
+     * @throws TextoSendFailedException
+     */
+    protected function resolveConversation(PhoneNumber $to, string $fromNumber): array
+    {
         $prefix = $this->config['conversation_prefix'] ?? 'Texto';
         $friendlyName = $prefix.'-'.$to->e164.'-'.bin2hex(random_bytes(4));
         try {
@@ -164,6 +247,7 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
                     Log::warning('Duplicate participant error without parsable conversation SID; continuing with new conversation.', ['conversation_sid' => $conversationSid, 'error' => $e->getMessage()]);
                 }
             } else {
+                $this->deleteConversationSilently($conversationSid);
                 Log::error('Failed to add initial participant to Twilio Conversation', ['conversation_sid' => $conversationSid, 'error' => $e->getMessage()]);
                 throw new TextoSendFailedException('Unable to add participant to Twilio Conversation: '.$e->getMessage());
             }
@@ -171,23 +255,34 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
 
         $this->addParticipantSilently($conversationSid, $fromNumber, $fromNumber);
 
-        // Metadata webhook_url overrides the configured default.
-        $webhookUrl = $metadata['webhook_url'] ?? ($this->config['conversation_webhook_url'] ?? null);
-        $webhookSid = null;
-        if ($webhookUrl) {
-            $webhookSid = $this->attachConversationWebhook($conversationSid, $webhookUrl);
-        }
+        return [$conversationSid, $reusedConversation];
+    }
 
-        $mediaUrl = $mediaUrls[0] ?? null;
-        $contentVariables = $this->prepareContentVariables($body, $mediaUrl);
-        $contentSid = $mediaUrl ? $this->mmsTemplateSid : $this->smsTemplateSid;
-
-        $useContentTemplate = $contentSid !== null;
+    /**
+     * Send the message into a resolved conversation and build the send result.
+     *
+     * @param  string[]  $mediaUrls
+     * @param  array<string, mixed>  $metadata
+     *
+     * @throws TextoSendFailedException
+     */
+    protected function deliverConversationMessage(
+        string $conversationSid,
+        bool $reusedConversation,
+        ?string $webhookSid,
+        PhoneNumber $to,
+        string $body,
+        string $fromNumber,
+        array $mediaUrls,
+        array $metadata,
+        bool $useContentTemplate,
+        ?string $contentSid,
+    ): SentMessageResult {
         $messageData = [
             'Author' => $fromNumber,
             ...($useContentTemplate ? [
                 'ContentSid' => $contentSid,
-                'ContentVariables' => json_encode($contentVariables),
+                'ContentVariables' => json_encode($this->prepareContentVariables($body, $mediaUrls[0] ?? null)),
             ] : ['Body' => $body]),
         ];
 
@@ -229,6 +324,21 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
         ]);
 
         return $result;
+    }
+
+    protected function conversationCacheKey(string $toE164, string $fromNumber): string
+    {
+        // Scoped by account SID so per-send credential overrides never reuse another tenant's conversation.
+        return 'texto:twilio:conversation:'.($this->config['account_sid'] ?? '').':'.$fromNumber.':'.$toE164;
+    }
+
+    protected function deleteConversationSilently(string $conversationSid): void
+    {
+        try {
+            $this->conversationsApi->deleteConversation($conversationSid);
+        } catch (\Throwable $e) {
+            Log::debug('Failed to delete Twilio Conversation (non-fatal)', ['conversation_sid' => $conversationSid, 'error' => $e->getMessage()]);
+        }
     }
 
     protected function initializeTemplates(): void
@@ -303,7 +413,10 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
     }
 
     /**
-     * Split message body into template variables (up to 5 segments of 100 chars each).
+     * Split message body into template variables (TEMPLATE_BODY_SEGMENTS segments of
+     * TEMPLATE_BODY_SEGMENT_CHARS characters each). Callers must ensure the body fits within
+     * TEMPLATE_BODY_MAX_CHARS; the multibyte split keeps UTF-8 characters intact at segment
+     * boundaries (a byte-based split could corrupt them).
      *
      * @param  string  $body  Message body text
      * @param  string|null  $mediaUrl  Optional media URL for MMS templates
@@ -311,9 +424,9 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
      */
     protected function prepareContentVariables(string $body, ?string $mediaUrl = null): array
     {
-        $parts = str_split($body, 100);
+        $parts = mb_str_split($body, self::TEMPLATE_BODY_SEGMENT_CHARS);
         $vars = [];
-        for ($i = 1; $i <= 5; $i++) {
+        for ($i = 1; $i <= self::TEMPLATE_BODY_SEGMENTS; $i++) {
             $vars['message_body_'.$i] = $parts[$i - 1] ?? '';
         }
         if ($mediaUrl) {

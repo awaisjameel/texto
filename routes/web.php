@@ -5,7 +5,6 @@ use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Events\MessageReceived;
 use Awaisjameel\Texto\Events\MessageStatusUpdated;
 use Awaisjameel\Texto\Http\Middleware\RateLimitTextoWebhook;
-use Awaisjameel\Texto\Http\Middleware\VerifyTextoWebhookSecret;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
 use Awaisjameel\Texto\Webhooks\TelnyxWebhookHandler;
 use Awaisjameel\Texto\Webhooks\TwilioWebhookHandler;
@@ -29,14 +28,19 @@ $processWebhook = function (WebhookProcessingResult $result, MessageRepositoryIn
     }
 };
 
-Route::middleware([VerifyTextoWebhookSecret::class, RateLimitTextoWebhook::class])
+Route::middleware([RateLimitTextoWebhook::class])
     ->post('/texto/webhook/twilio', function (Request $request, TwilioWebhookHandler $handler, MessageRepositoryInterface $repo) use ($processWebhook) {
-        $processWebhook($handler->handle($request), $repo);
+        // A null result is an authentic event the handler chose to ignore (e.g. the
+        // Conversations echo of a message this package itself sent).
+        $result = $handler->handle($request);
+        if ($result !== null) {
+            $processWebhook($result, $repo);
+        }
 
         return response()->json(['ok' => true]);
     })->name('texto.webhook.twilio');
 
-Route::middleware([VerifyTextoWebhookSecret::class, RateLimitTextoWebhook::class])
+Route::middleware([RateLimitTextoWebhook::class])
     ->post('/texto/webhook/telnyx', function (Request $request, TelnyxWebhookHandler $handler, MessageRepositoryInterface $repo) use ($processWebhook) {
         $processWebhook($handler->handle($request), $repo);
 
@@ -47,9 +51,11 @@ Route::middleware([VerifyTextoWebhookSecret::class, RateLimitTextoWebhook::class
 Route::middleware([RateLimitTextoWebhook::class])
     ->get('/texto/webhook/whatsapp', function (Request $request) {
         $verifyToken = (string) config('texto.whatsapp.verify_token');
-        if ($verifyToken !== ''
+        if (
+            $verifyToken !== ''
             && $request->query('hub_mode') === 'subscribe'
-            && hash_equals($verifyToken, (string) $request->query('hub_verify_token'))) {
+            && hash_equals($verifyToken, (string) $request->query('hub_verify_token'))
+        ) {
             return response((string) $request->query('hub_challenge'), 200)
                 ->header('Content-Type', 'text/plain');
         }

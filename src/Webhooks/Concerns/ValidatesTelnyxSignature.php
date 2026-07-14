@@ -20,6 +20,16 @@ trait ValidatesTelnyxSignature
         if (! $signature || ! $timestamp) {
             throw new TextoWebhookValidationException('Telnyx signature headers missing.');
         }
+
+        $tolerance = (int) ($config['webhook_tolerance_seconds'] ?? 300);
+        if ($tolerance > 0) {
+            if (! ctype_digit($timestamp)) {
+                throw new TextoWebhookValidationException('Telnyx signature timestamp malformed.');
+            }
+            if (abs(time() - (int) $timestamp) > $tolerance) {
+                throw new TextoWebhookValidationException('Telnyx webhook timestamp outside allowed tolerance.');
+            }
+        }
         if (! extension_loaded('sodium')) {
             throw new TextoWebhookValidationException('Sodium extension required for Telnyx signature verification.');
         }

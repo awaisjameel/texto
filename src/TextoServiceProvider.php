@@ -9,18 +9,8 @@ use Awaisjameel\Texto\Commands\TextoTestSendCommand;
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
-use Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface;
-use Awaisjameel\Texto\Contracts\TwilioContentApiInterface;
-use Awaisjameel\Texto\Contracts\TwilioConversationsApiInterface;
-use Awaisjameel\Texto\Contracts\TwilioMessagingApiInterface;
-use Awaisjameel\Texto\Contracts\WhatsappApiInterface;
 use Awaisjameel\Texto\Jobs\StatusPollJob;
 use Awaisjameel\Texto\Repositories\EloquentMessageRepository;
-use Awaisjameel\Texto\Support\TelnyxMessagingApi;
-use Awaisjameel\Texto\Support\TwilioContentApi;
-use Awaisjameel\Texto\Support\TwilioConversationsApi;
-use Awaisjameel\Texto\Support\TwilioMessagingApi;
-use Awaisjameel\Texto\Support\WhatsappApi;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -43,37 +33,7 @@ class TextoServiceProvider extends PackageServiceProvider
 
     public function packageRegistered(): void
     {
-        // Bind the driver manager as a singleton so driver extensions applied during runtime (e.g. in tests)
-        // persist. Binding the class directly (instead of a closure resolving $app['config']) lets the
-        // container inject the ConfigRepository by type-hint and keeps the binding Octane-safe.
         $this->app->singleton(DriverManagerInterface::class, DriverManager::class);
-        // Twilio API adapter bindings (only when credentials present). Skip binding to avoid test-time TypeErrors.
-        $twilioSid = config('texto.twilio.account_sid');
-        $twilioToken = config('texto.twilio.auth_token');
-        if ($twilioSid && $twilioToken) {
-            $this->app->singleton(TwilioMessagingApiInterface::class, function () use ($twilioSid, $twilioToken) {
-                return new TwilioMessagingApi($twilioSid, $twilioToken);
-            });
-            $this->app->singleton(TwilioConversationsApiInterface::class, function () use ($twilioSid, $twilioToken) {
-                return new TwilioConversationsApi($twilioSid, $twilioToken);
-            });
-            $this->app->singleton(TwilioContentApiInterface::class, function () use ($twilioSid, $twilioToken) {
-                return new TwilioContentApi($twilioSid, $twilioToken);
-            });
-        }
-        $telnyxKey = config('texto.telnyx.api_key');
-        if ($telnyxKey) {
-            $this->app->singleton(TelnyxMessagingApiInterface::class, function () use ($telnyxKey) {
-                return new TelnyxMessagingApi($telnyxKey);
-            });
-        }
-        $whatsappToken = config('texto.whatsapp.access_token');
-        $whatsappPhoneNumberId = config('texto.whatsapp.phone_number_id');
-        if ($whatsappToken && $whatsappPhoneNumberId) {
-            $this->app->singleton(WhatsappApiInterface::class, function () use ($whatsappToken, $whatsappPhoneNumberId) {
-                return new WhatsappApi((string) $whatsappToken, (string) $whatsappPhoneNumberId);
-            });
-        }
 
         $this->app->singleton(MessageRepositoryInterface::class, function ($app) {
             return new EloquentMessageRepository;
@@ -96,7 +56,7 @@ class TextoServiceProvider extends PackageServiceProvider
 
     public function packageBooted(): void
     {
-        // Register Twilio HTTP macro for unified direct REST calls (messaging|conversations|content)
+
         if (! Http::hasMacro('twilio')) {
             Http::macro('twilio', function (string $api = 'messaging') {
                 $base = config("texto.twilio.base_urls.$api");

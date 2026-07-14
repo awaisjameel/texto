@@ -22,7 +22,12 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
         $this->config = $config ?: config('texto.twilio', []);
     }
 
-    public function handle(Request $request): WebhookProcessingResult
+    /**
+     * Returns null when the event is authentic but intentionally ignored — Conversations
+     * fires onMessageAdded for messages this package itself just sent, and storing that
+     * echo would create a duplicate inbound row and a spurious MessageReceived event.
+     */
+    public function handle(Request $request): ?WebhookProcessingResult
     {
         $skipValidation = config('texto.testing.skip_webhook_validation', false) && app()->environment('testing');
         $token = $this->config['auth_token'] ?? null;
@@ -31,8 +36,13 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
         }
         if (! $skipValidation) {
             $signature = $request->header('X-Twilio-Signature');
+            // Twilio signs the full URL (query string included) plus the POST body fields
+            // only — query parameters must not be folded into the concatenated param list,
+            // so $request->post(), never $request->all(). Behind a TLS-terminating proxy,
+            // fullUrl() must reconstruct the public https URL (configure TrustProxies) or
+            // validation fails on every request.
             $url = $request->fullUrl();
-            $params = $request->all();
+            $params = $request->post();
             if (! $signature || ! TwilioSignatureValidator::validate($token, $url, $params, $signature)) {
                 throw new TextoWebhookValidationException('Invalid Twilio webhook signature.');
             }
@@ -64,6 +74,10 @@ class TwilioWebhookHandler implements WebhookHandlerInterface
                 }
             } else {
                 $to = $this->parsePhoneOrFail($authorRaw, 'author');
+            }
+
+            if ($fromNumberConfigured && $author->e164 === $to->e164) {
+                return null;
             }
             $body = $request->input('Body');
             $providerId = $request->input('MessageSid');

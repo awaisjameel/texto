@@ -10,6 +10,7 @@ use Awaisjameel\Texto\Exceptions\TwilioApiException;
 use Awaisjameel\Texto\Exceptions\TwilioApiNotFoundException;
 use Awaisjameel\Texto\Exceptions\TwilioApiRateLimitException;
 use Awaisjameel\Texto\Exceptions\TwilioApiValidationException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -20,6 +21,11 @@ class TwilioMessagingApi implements TwilioMessagingApiInterface
         if ($accountSid === '' || $authToken === '') {
             throw new \InvalidArgumentException('TwilioMessagingApi requires non-empty credentials.');
         }
+    }
+
+    protected function http(): PendingRequest
+    {
+        return Http::twilio('messaging')->withBasicAuth($this->accountSid, $this->authToken);
     }
 
     public function sendMessage(string $to, string $from, ?string $body, array $mediaUrls = [], array $options = []): array
@@ -39,7 +45,7 @@ class TwilioMessagingApi implements TwilioMessagingApiInterface
             $form .= '&'.'MediaUrl='.rawurlencode($m);
         }
 
-        $response = Http::twilio('messaging')
+        $response = $this->http()
             ->withBody($form, 'application/x-www-form-urlencoded')
             ->post($endpoint);
 
@@ -55,7 +61,7 @@ class TwilioMessagingApi implements TwilioMessagingApiInterface
     public function fetchMessage(string $messageSid): array
     {
         $endpoint = '/Accounts/'.$this->accountSid.'/Messages/'.$messageSid.'.json';
-        $response = Http::twilio('messaging')->get($endpoint);
+        $response = $this->http()->get($endpoint);
         if ($response->successful()) {
             return $response->json();
         }
