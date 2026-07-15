@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto\ValueObjects;
 
+use Awaisjameel\Texto\Contracts\AddressInterface;
 use Awaisjameel\Texto\Enums\Direction;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
@@ -21,8 +22,8 @@ final class SentMessageResult implements \JsonSerializable, \Stringable, Respons
     public function __construct(
         public readonly Driver $driver,
         public readonly Direction $direction,
-        public readonly PhoneNumber $to,
-        public readonly ?PhoneNumber $from,
+        public readonly AddressInterface $to,
+        public readonly ?AddressInterface $from,
         public readonly string $body,
         /** @var string[] */
         public readonly array $mediaUrls,
@@ -42,7 +43,7 @@ final class SentMessageResult implements \JsonSerializable, \Stringable, Respons
             'driver' => $this->driver->value,
             'direction' => $this->direction->value,
             'to' => (string) $this->to,
-            'from' => $this->from?->e164,
+            'from' => $this->from?->value(),
             'body' => $this->body,
             'media_urls' => $this->mediaUrls,
             'metadata' => $this->metadata,

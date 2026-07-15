@@ -22,6 +22,7 @@ final class StatusMapper
             Driver::Twilio => self::mapTwilio($rawStatus ?? $eventType),
             Driver::Telnyx => self::mapTelnyx($rawStatus, $eventType),
             Driver::Whatsapp => self::mapWhatsapp($rawStatus),
+            Driver::Email => self::mapEmail($rawStatus ?? $eventType),
         };
     }
 
@@ -96,6 +97,34 @@ final class StatusMapper
             'message.sending' => MessageStatus::Sending,
             'message.sent' => MessageStatus::Sent,
             default => null,
+        };
+    }
+
+    /**
+     * Email providers use a shared vocabulary for delivery events (SES/SendGrid/Mailgun/
+     * Postmark/Resend all converge on these terms). Notable choices:
+     * - opened/clicked map to Read (the email analogue of a read receipt);
+     * - complaint maps to Delivered — the message DID reach the mailbox; the complaint
+     *   itself is preserved in metadata.raw_status for the application to act on;
+     * - deferred is a transient retry state, not a failure.
+     */
+    private static function mapEmail(?string $status): MessageStatus
+    {
+        if (! $status) {
+            return MessageStatus::Sent;
+        }
+
+        return match (strtolower($status)) {
+            'queued', 'accepted' => MessageStatus::Queued,
+            'sending', 'deferred', 'delayed' => MessageStatus::Sending,
+            'sent', 'processed', 'delivery_unknown' => MessageStatus::Sent,
+            'delivered', 'delivery' => MessageStatus::Delivered,
+            'opened', 'open', 'clicked', 'click', 'read' => MessageStatus::Read,
+            'complained', 'complaint', 'spam' => MessageStatus::Delivered,
+            'bounced', 'bounce', 'hard_bounce', 'permanent_fail', 'failed', 'dropped', 'rejected', 'suppressed' => MessageStatus::Failed,
+            'soft_bounce', 'temporary_fail', 'undelivered' => MessageStatus::Undelivered,
+            'received', 'inbound' => MessageStatus::Received,
+            default => MessageStatus::Sent,
         };
     }
 

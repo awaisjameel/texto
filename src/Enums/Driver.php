@@ -9,4 +9,5 @@ enum Driver: string
     case Twilio = 'twilio';
     case Telnyx = 'telnyx';
     case Whatsapp = 'whatsapp';
+    case Email = 'email';
 }

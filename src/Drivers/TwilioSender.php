@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto\Drivers;
 
+use Awaisjameel\Texto\Contracts\AddressInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
 use Awaisjameel\Texto\Contracts\PollableMessageSenderInterface;
 use Awaisjameel\Texto\Contracts\TwilioContentApiInterface;
@@ -27,6 +28,8 @@ use Illuminate\Support\Facades\Log;
 
 class TwilioSender implements MessageSenderInterface, PollableMessageSenderInterface
 {
+    use Concerns\ExpectsPhoneNumbers;
+
     protected const TEMPLATE_BODY_SEGMENTS = 5;
 
     protected const TEMPLATE_BODY_SEGMENT_CHARS = 100;
@@ -64,16 +67,18 @@ class TwilioSender implements MessageSenderInterface, PollableMessageSenderInter
      *
      * Supports both Conversations API (with templates) and classic Messages API.
      *
-     * @param  PhoneNumber  $to  Recipient phone number
+     * @param  AddressInterface  $to  Recipient phone number
      * @param  string  $body  Message body text
-     * @param  PhoneNumber|null  $from  Sender phone number
+     * @param  AddressInterface|null  $from  Sender phone number
      * @param  string[]  $mediaUrls  Array of media URLs for MMS
      * @param  array<string, mixed>  $metadata  Additional metadata
      *
      * @throws TextoSendFailedException
      */
-    public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
+    public function send(AddressInterface $to, string $body, ?AddressInterface $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
     {
+        $to = $this->assertPhoneNumber($to, 'Twilio', 'to');
+        $from = $from !== null ? $this->assertPhoneNumber($from, 'Twilio', 'from') : null;
 
         $fromNumber = $from ? $from->e164 : ($this->config['from_number'] ?? null);
         if (! $fromNumber) {

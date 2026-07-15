@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Awaisjameel\Texto\Contracts\AddressInterface;
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
@@ -11,7 +12,6 @@ use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Jobs\StatusPollJob;
 use Awaisjameel\Texto\Models\Message;
-use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 
 it('promotes queued to sent on polling when provider returns sent', function () {
@@ -28,7 +28,7 @@ it('promotes queued to sent on polling when provider returns sent', function () 
             {
                 return new class implements MessageSenderInterface, PollableMessageSenderInterface
                 {
-                    public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
+                    public function send(AddressInterface $to, string $body, ?AddressInterface $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
                     {
                         throw new RuntimeException('send not used in polling test');
                     }

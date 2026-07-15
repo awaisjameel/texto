@@ -6,6 +6,7 @@ use Awaisjameel\Texto\Events\MessageReceived;
 use Awaisjameel\Texto\Events\MessageStatusUpdated;
 use Awaisjameel\Texto\Http\Middleware\RateLimitTextoWebhook;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
+use Awaisjameel\Texto\Webhooks\EmailWebhookHandler;
 use Awaisjameel\Texto\Webhooks\TelnyxWebhookHandler;
 use Awaisjameel\Texto\Webhooks\TwilioWebhookHandler;
 use Awaisjameel\Texto\Webhooks\WhatsappWebhookHandler;
@@ -46,6 +47,15 @@ Route::middleware([RateLimitTextoWebhook::class])
 
         return response()->json(['ok' => true]);
     })->name('texto.webhook.telnyx');
+
+// Email has no universal provider signature scheme; the handler authenticates the request
+// itself with the shared texto.webhook.secret (X-Texto-Secret header or ?secret= query param).
+Route::middleware([RateLimitTextoWebhook::class])
+    ->post('/texto/webhook/email', function (Request $request, EmailWebhookHandler $handler, MessageRepositoryInterface $repo) use ($processWebhook) {
+        $processWebhook($handler->handle($request), $repo);
+
+        return response()->json(['ok' => true]);
+    })->name('texto.webhook.email');
 
 // Meta validates subscriptions with this GET handshake. It cannot send Texto's shared secret.
 Route::middleware([RateLimitTextoWebhook::class])
