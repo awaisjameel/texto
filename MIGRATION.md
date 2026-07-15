@@ -1,4 +1,28 @@
-# Migration from twilio/sdk to Direct REST
+# Texto Migration Guide
+
+## Email driver (additive, with one interface change)
+
+The email driver is additive for normal `Texto::send()` callers — pass an email address as the
+recipient and (optionally) `driver => 'email'`. It sends through the host app's Laravel mailer, so
+no new dependency or credentials are required beyond `config/mail.php`. Merge the new `email` block
+into a published `config/texto.php`.
+
+One **breaking change** accompanies it: the public contracts are now typed to `AddressInterface`
+instead of `PhoneNumber`:
+
+- `MessageSenderInterface::send(AddressInterface $to, string $body, ?AddressInterface $from = null, ...)`
+- `SentMessageResult::$to` / `::$from` and `WebhookProcessingResult::$to` / `::$from`
+
+`PhoneNumber` implements `AddressInterface`, so existing *callers* keep working. You must update:
+
+- Custom senders registered via `DriverManager::extend()` — change the `send()` signature to
+  `AddressInterface` and, if the driver is phone-only, narrow with the `ExpectsPhoneNumbers` trait.
+- Code that reads `$result->to->e164` — prefer `$result->to->value()`, which works for both address
+  types (`e164` still exists on `PhoneNumber` instances).
+
+The inbound/status email webhook lives at `/texto/webhook/email` and requires `TEXTO_WEBHOOK_SECRET`
+(header `X-Texto-Secret` or `?secret=` query parameter). See the README's Webhooks section for the
+normalized payload format.
 
 ## WhatsApp driver (additive)
 
@@ -6,9 +30,11 @@ The WhatsApp Cloud API driver is additive. If you have published `config/texto.p
 
 The current WhatsApp configuration defaults to Graph API `v25.0`. If you override `WHATSAPP_BASE_URL`, update it to a supported Graph version. WhatsApp delivery receipts now preserve `read` as a distinct status. Meta webhook retries are deduplicated using the provider message ID; multi-node deployments should use a shared, lock-capable cache such as Redis.
 
-This document summarizes the transition removing the `twilio/sdk` dependency in favor of Laravel's HTTP client with first-class adapters.
+## Migration from twilio/sdk to Direct REST
 
-## Summary
+This section summarizes the transition removing the `twilio/sdk` dependency in favor of Laravel's HTTP client with first-class adapters.
+
+### Summary
 
 - Removed `twilio/sdk` from `composer.json`.
 - Added HTTP macro `Http::twilio()` for consistent auth + base URL handling.
@@ -23,7 +49,7 @@ This document summarizes the transition removing the `twilio/sdk` dependency in 
 - Updated webhook handler to use new signature validator.
 - Added tests covering messaging, conversations, content templates, and webhook validation.
 
-## New Error Handling Strategy
+### New Error Handling Strategy
 
 Responses are inspected for HTTP status and Twilio error `code` field.
 
@@ -35,23 +61,23 @@ Responses are inspected for HTTP status and Twilio error `code` field.
 
 Retry/backoff uses existing `Retry::exponential` with values sourced from `config('texto.twilio.retry.*')` (fallback to `texto.retry`).
 
-## Signature Validation
+### Signature Validation
 
 Previous SDK logic: `RequestValidator`.
 Now: `TwilioSignatureValidator::validate($token, $url, $params, $signature)`.
 Ordering rule: ASCII sort keys, append key+value to URL, HMAC-SHA1, Base64 encode.
 
-## Conversation Flow Changes
+### Conversation Flow Changes
 
 - Conversation creation, participant add, message send, webhook attach now pure REST endpoints.
 - Duplicate participant detection relies on Twilio error `code` 50416; conversation SID parsed from error message (logic retained).
 
-## Content Templates
+### Content Templates
 
 - Template ensure logic moved to `TwilioContentApi`.
 - Fallback casing attempts (snake_case and TitleCase) preserved.
 
-## Testing Strategy
+### Testing Strategy
 
 Uses `Http::fake()` with URL pattern matching for Twilio endpoints:
 
@@ -59,7 +85,7 @@ Uses `Http::fake()` with URL pattern matching for Twilio endpoints:
 - `conversations.twilio.com/v1/...`
 - `content.twilio.com/v1/Content`
 
-## How to Upgrade
+### How to Upgrade
 
 1. Remove `twilio/sdk` from your downstream app `composer.json` if explicitly required.
 2. Publish new config (already auto-published via `texto:install`): `config/twilio.php`.
@@ -71,13 +97,13 @@ Uses `Http::fake()` with URL pattern matching for Twilio endpoints:
    ```
 4. Run tests to verify functionality: `composer test`.
 
-## Potential Follow-ups
+### Potential Follow-ups
 
 - Implement rate limit adaptive backoff (inspect `TwilioApiRateLimitException`).
 - Add caching layer for Content template lookups.
 - Provide optional async dispatch for Conversations create + send.
 
-## Rollback Plan
+### Rollback Plan
 
 If any issue arises, re-add `"twilio/sdk": "^8.8"` and revert `TwilioSender` to prior implementation (git revert commit). All adapters are additive and can coexist temporarily.
 

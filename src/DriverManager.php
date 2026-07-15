@@ -6,6 +6,7 @@ namespace Awaisjameel\Texto;
 
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
+use Awaisjameel\Texto\Drivers\EmailSender;
 use Awaisjameel\Texto\Drivers\TelnyxSender;
 use Awaisjameel\Texto\Drivers\TwilioSender;
 use Awaisjameel\Texto\Drivers\WhatsappSender;
@@ -35,6 +36,7 @@ class DriverManager implements DriverManagerInterface
             Driver::Twilio => new TwilioSender($driverConfig),
             Driver::Telnyx => new TelnyxSender($driverConfig),
             Driver::Whatsapp => new WhatsappSender($driverConfig),
+            Driver::Email => new EmailSender($driverConfig),
         };
     }
 

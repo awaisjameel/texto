@@ -33,8 +33,8 @@ class EloquentMessageRepository implements MessageRepositoryInterface
         $record = Message::create([
             'direction' => $result->direction->value,
             'driver' => $result->driver->value,
-            'from_number' => $result->from?->e164,
-            'to_number' => $result->to->e164,
+            'from_number' => $result->from?->value(),
+            'to_number' => $result->to->value(),
             'body' => $result->body,
             'media_urls' => $result->mediaUrls,
             'status' => $result->status->value,
@@ -55,8 +55,8 @@ class EloquentMessageRepository implements MessageRepositoryInterface
         $attributes = [
             'direction' => $result->direction->value,
             'driver' => $result->driver->value,
-            'from_number' => $result->from?->e164,
-            'to_number' => $result->to?->e164,
+            'from_number' => $result->from?->value(),
+            'to_number' => $result->to?->value(),
             'body' => $result->body,
             'media_urls' => $result->mediaUrls,
             'status' => ($result->status ? $result->status->value : MessageStatus::Received->value),

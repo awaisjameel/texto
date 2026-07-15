@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto\ValueObjects;
 
+use Awaisjameel\Texto\Contracts\AddressInterface;
 use Awaisjameel\Texto\Exceptions\TextoException;
 use libphonenumber\NumberParseException;
 use libphonenumber\PhoneNumberFormat;
 use libphonenumber\PhoneNumberUtil;
 
-final class PhoneNumber
+final class PhoneNumber implements AddressInterface
 {
     /**
      * @param  string  $e164  The canonical sender/recipient address. Normally an E.164 number,
@@ -57,6 +58,11 @@ final class PhoneNumber
     private static function isAlphanumericSenderId(string $value): bool
     {
         return (bool) preg_match('/^(?=.*[A-Za-z])[A-Za-z0-9 ]{1,11}$/', $value);
+    }
+
+    public function value(): string
+    {
+        return $this->e164;
     }
 
     public function __toString(): string

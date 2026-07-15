@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto;
 
+use Awaisjameel\Texto\Contracts\AddressInterface;
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
@@ -15,6 +16,7 @@ use Awaisjameel\Texto\Events\MessageSent;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Jobs\SendMessageJob;
 use Awaisjameel\Texto\Models\Message;
+use Awaisjameel\Texto\ValueObjects\EmailAddress;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Closure;
@@ -30,11 +32,14 @@ class Texto
     ) {}
 
     /**
-     * Send an SMS/MMS message using the active (or overridden) driver.
+     * Send a message (SMS/MMS/WhatsApp/Email) using the active (or overridden) driver.
      *
-     * @param  string  $to  Recipient phone number (E.164 format or local format)
-     * @param  string  $body  Message body text
-     * @param  array{media_urls?:string[], metadata?:array, from?:string, driver?:string, driver_config?:array<string,mixed>, queued_job?:bool, queued_message_id?:int}  $options
+     * Email-specific options (subject, html, cc, bcc, reply_to, attachments) are only
+     * consumed by the email driver and are persisted inside the message metadata.
+     *
+     * @param  string  $to  Recipient phone number (E.164 or local format) or email address
+     * @param  string  $body  Message body text (plain text)
+     * @param  array{media_urls?:string[], metadata?:array, from?:string, driver?:string, driver_config?:array<string,mixed>, subject?:string, html?:string, cc?:string[], bcc?:string[], reply_to?:string, attachments?:array<int, string|array{path?:string, url?:string, name?:string, mime?:string}>, queued_job?:bool, queued_message_id?:int}  $options
      *
      * @throws TextoSendFailedException
      */
@@ -44,11 +49,11 @@ class Texto
     }
 
     /**
-     * Send an SMS/MMS message immediately, bypassing the queue even if enabled.
+     * Send a message immediately, bypassing the queue even if enabled.
      *
-     * @param  string  $to  Recipient phone number (E.164 format or local format)
-     * @param  string  $body  Message body text
-     * @param  array{media_urls?:string[], metadata?:array, from?:string, driver?:string, driver_config?:array<string,mixed>, queued_job?:bool, queued_message_id?:int}  $options
+     * @param  string  $to  Recipient phone number (E.164 or local format) or email address
+     * @param  string  $body  Message body text (plain text)
+     * @param  array{media_urls?:string[], metadata?:array, from?:string, driver?:string, driver_config?:array<string,mixed>, subject?:string, html?:string, cc?:string[], bcc?:string[], reply_to?:string, attachments?:array<int, string|array{path?:string, url?:string, name?:string, mime?:string}>, queued_job?:bool, queued_message_id?:int}  $options
      *
      * @throws TextoSendFailedException
      */
@@ -58,26 +63,26 @@ class Texto
     }
 
     /**
-     * @param  array{media_urls?:string[], metadata?:array, from?:string, driver?:string, driver_config?:array<string,mixed>, queued_job?:bool, queued_message_id?:int}  $options
+     * @param  array{media_urls?:string[], metadata?:array, from?:string, driver?:string, driver_config?:array<string,mixed>, subject?:string, html?:string, cc?:string[], bcc?:string[], reply_to?:string, attachments?:array<int, string|array{path?:string, url?:string, name?:string, mime?:string}>, queued_job?:bool, queued_message_id?:int}  $options
      */
     private function performSend(string $to, string $body, array $options, bool $forceSynchronous): SentMessageResult
     {
         $driverName = Arr::get($options, 'driver');
         $driverConfigOverride = Arr::get($options, 'driver_config');
 
-        $toNumber = PhoneNumber::fromString($to);
-        $fromNumber = isset($options['from']) ? PhoneNumber::fromString($options['from']) : null;
+        $toAddress = $this->parseAddress($to);
+        $fromAddress = isset($options['from']) ? $this->parseAddress($options['from']) : null;
         // Resolve effective default 'from' (so queued row uses same as final send) if still null
-        if (! $fromNumber) {
+        if (! $fromAddress) {
             $activeDriver = $driverName ?: config('texto.driver', 'twilio');
             $driverConfig = config("texto.{$activeDriver}", []);
-            $rawFrom = $driverConfig['from_number'] ?? null;
+            $rawFrom = $driverConfig['from_number'] ?? $driverConfig['from_address'] ?? null;
 
             if ($rawFrom) {
                 try {
-                    $fromNumber = PhoneNumber::fromString($rawFrom);
+                    $fromAddress = $this->parseAddress($rawFrom);
                 } catch (\Throwable $e) {
-                    Log::warning('Texto default from number invalid', [
+                    Log::warning('Texto default from address invalid', [
                         'from' => $rawFrom,
                         'driver' => $activeDriver,
                         'error' => $e->getMessage(),
@@ -87,8 +92,9 @@ class Texto
         }
         $media = $options['media_urls'] ?? [];
         $metadata = $options['metadata'] ?? [];
+        $metadata = $this->foldEmailOptionsIntoMetadata($options, $metadata);
 
-        return $this->withDriverConfigOverride($driverName, is_array($driverConfigOverride) ? $driverConfigOverride : null, function () use ($driverName, $options, $toNumber, $fromNumber, $body, $media, $metadata, $forceSynchronous) {
+        return $this->withDriverConfigOverride($driverName, is_array($driverConfigOverride) ? $driverConfigOverride : null, function () use ($driverName, $options, $toAddress, $fromAddress, $body, $media, $metadata, $forceSynchronous) {
             $sender = $driverName
                 ? $this->driverManager->sender(Driver::from($driverName))
                 : $this->driverManager->sender();
@@ -99,8 +105,8 @@ class Texto
                 $queuedResult = new SentMessageResult(
                     Driver::from($currentDriver),
                     Direction::Sent,
-                    $toNumber,
-                    $fromNumber,
+                    $toAddress,
+                    $fromAddress,
                     $body,
                     $media,
                     $metadata,
@@ -114,8 +120,8 @@ class Texto
                 // Dispatch with the exact queued message id (0 if not stored so upgrade falls back later)
                 /** @var Message|null $record */
                 $queuedId = $record ? (int) $record->id : 0;
-                Bus::dispatch(new SendMessageJob($queuedId, $toNumber->e164, $body, [
-                    'from' => $fromNumber?->e164,
+                Bus::dispatch(new SendMessageJob($queuedId, $toAddress->value(), $body, [
+                    'from' => $fromAddress?->value(),
                     'media_urls' => $media,
                     'metadata' => $metadata,
                     'driver' => $currentDriver,
@@ -127,20 +133,20 @@ class Texto
 
             try {
                 /** @var MessageSenderInterface $sender */
-                $result = $sender->send($toNumber, $body, $fromNumber, $media, $metadata);
+                $result = $sender->send($toAddress, $body, $fromAddress, $media, $metadata);
             } catch (TextoSendFailedException $e) {
                 Log::error('Texto send failed', [
                     'driver' => $driverName ?: config('texto.driver', 'twilio'),
-                    'to' => $toNumber->e164,
-                    'from' => $fromNumber?->e164,
+                    'to' => $toAddress->value(),
+                    'from' => $fromAddress?->value(),
                     'error' => $e->getMessage(),
                 ]);
                 $currentDriver = $driverName ?: config('texto.driver', 'twilio');
                 $failed = new SentMessageResult(
                     Driver::from($currentDriver),
                     Direction::Sent,
-                    $toNumber,
-                    $fromNumber,
+                    $toAddress,
+                    $fromAddress,
                     $body,
                     $media,
                     $metadata,
@@ -185,6 +191,48 @@ class Texto
 
             return $result;
         });
+    }
+
+    /**
+     * Parse a raw recipient/sender string into the right address value object.
+     * Phone numbers never contain '@', so its presence reliably selects email.
+     */
+    private function parseAddress(string $raw): AddressInterface
+    {
+        return str_contains($raw, '@')
+            ? EmailAddress::fromString($raw)
+            : PhoneNumber::fromString($raw);
+    }
+
+    /**
+     * Email-specific send options ride inside metadata under the 'email' key so they persist
+     * with the stored message and survive the queue round-trip (SendMessageJob re-enters
+     * performSend with metadata intact but without the original top-level options).
+     *
+     * @param  array<string, mixed>  $options
+     * @param  array<string, mixed>  $metadata
+     * @return array<string, mixed>
+     */
+    private function foldEmailOptionsIntoMetadata(array $options, array $metadata): array
+    {
+        $emailOptions = array_filter([
+            'subject' => $options['subject'] ?? null,
+            'html' => $options['html'] ?? null,
+            'cc' => $options['cc'] ?? null,
+            'bcc' => $options['bcc'] ?? null,
+            'reply_to' => $options['reply_to'] ?? null,
+            'attachments' => $options['attachments'] ?? null,
+        ], static fn ($value) => $value !== null);
+
+        if ($emailOptions === []) {
+            return $metadata;
+        }
+
+        $existing = is_array($metadata['email'] ?? null) ? $metadata['email'] : [];
+        // Explicit top-level options win over anything already present in metadata.
+        $metadata['email'] = array_merge($existing, $emailOptions);
+
+        return $metadata;
     }
 
     /**

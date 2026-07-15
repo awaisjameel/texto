@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto\Drivers;
 
+use Awaisjameel\Texto\Contracts\AddressInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
 use Awaisjameel\Texto\Contracts\WhatsappApiInterface;
 use Awaisjameel\Texto\Enums\Direction;
@@ -22,6 +23,8 @@ use Illuminate\Support\Facades\Log;
 
 class WhatsappSender implements MessageSenderInterface
 {
+    use Concerns\ExpectsPhoneNumbers;
+
     protected WhatsappApiInterface $api;
 
     public function __construct(protected array $config, ?WhatsappApiInterface $api = null)
@@ -39,8 +42,10 @@ class WhatsappSender implements MessageSenderInterface
     }
 
     /** @param array<int, mixed> $mediaUrls */
-    public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
+    public function send(AddressInterface $to, string $body, ?AddressInterface $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
     {
+        $to = $this->assertPhoneNumber($to, 'WhatsApp', 'to');
+        $from = $from !== null ? $this->assertPhoneNumber($from, 'WhatsApp', 'from') : null;
         $payload = $this->buildPayload($to, $body, $mediaUrls, $metadata);
 
         try {

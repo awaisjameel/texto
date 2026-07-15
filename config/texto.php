@@ -56,6 +56,16 @@ return [
         'from_number' => env('WHATSAPP_FROM_NUMBER'),
         'timeout' => env('WHATSAPP_HTTP_TIMEOUT', 30),
     ],
+    'email' => [
+        // Named mailer from the host app's config/mail.php to send through (smtp, ses, resend,
+        // postmark, log, ...). Null uses the app's default mailer — no extra package needed.
+        'mailer' => env('TEXTO_EMAIL_MAILER'),
+        // Default sender. Falls back to the app's global mail.from when left empty.
+        'from_address' => env('TEXTO_EMAIL_FROM_ADDRESS'),
+        'from_name' => env('TEXTO_EMAIL_FROM_NAME'),
+        // Used when a send does not provide a 'subject' option.
+        'default_subject' => env('TEXTO_EMAIL_DEFAULT_SUBJECT', 'New message'),
+    ],
     'webhook' => [
         'secret' => env('TEXTO_WEBHOOK_SECRET'),
         'rate_limit' => env('TEXTO_WEBHOOK_RATE_LIMIT', 300), // requests per minute per webhook endpoint

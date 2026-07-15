@@ -1,7 +1,7 @@
 # Texto
 
 **
-Unified, extensible Laravel gateway for sending & receiving SMS/MMS over Twilio & Telnyx, plus WhatsApp through Meta's Cloud API.
+Unified, extensible Laravel gateway for sending & receiving SMS/MMS over Twilio & Telnyx, WhatsApp through Meta's Cloud API, and Email through your app's own Laravel mailer.
 Batteries included: queueing, retries, events, webhooks, polling, typed value objects.**
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/awaisjameel/texto.svg?style=flat-square)](https://packagist.org/packages/awaisjameel/texto)
@@ -9,11 +9,12 @@ Batteries included: queueing, retries, events, webhooks, polling, typed value ob
 [![Downloads](https://img.shields.io/packagist/dt/awaisjameel/texto.svg?style=flat-square)](https://packagist.org/packages/awaisjameel/texto)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE.md)
 
-Texto provides a unified, extensible Laravel package for carrier-grade SMS/MMS and WhatsApp messaging. Built for Laravel 10–13 (PHP 8.1+), it abstracts provider complexities (Twilio, Telnyx, Meta's WhatsApp Cloud API) through consistent contracts and value objects, enabling seamless integration with enterprise messaging workflows.
+Texto provides a unified, extensible Laravel package for carrier-grade SMS/MMS, WhatsApp, and Email messaging. Built for Laravel 10–13 (PHP 8.1+), it abstracts provider complexities (Twilio, Telnyx, Meta's WhatsApp Cloud API, any Laravel mailer) through consistent contracts and value objects, enabling seamless integration with enterprise messaging workflows.
 
 **Key Features:**
 
-- **Unified API**: Single interface for sending SMS/MMS across multiple providers
+- **Unified API**: Single interface for sending SMS/MMS/WhatsApp/Email across multiple providers
+- **Email Driver**: Send and receive email through the mailer your app already has configured (SMTP, SES, Resend, Postmark, ...) — no extra package, ideal for low-budget messaging
 - **Message Persistence**: Automatic storage of sent and received messages with full metadata
 - **Status Tracking**: Real-time delivery status updates via webhooks and fallback polling
 - **Event-Driven**: Rich event system for analytics, notifications, and custom automation
@@ -79,9 +80,10 @@ The philosophy is simple: messaging should be a first-class citizen in your Lara
 ### Core Messaging
 
 - **SMS & MMS Support**: Send text messages and media attachments through Twilio and Telnyx, plus WhatsApp text/media/template messages via Meta's Cloud API
-- **Unified API**: Single `Texto::send()` method works across all providers
-- **Phone Number Validation**: Automatic E.164 formatting and validation using libphonenumber
-- **Media Handling**: Support for multiple media URLs per message
+- **Email Support**: Send email (subject, HTML body, cc/bcc, reply-to, attachments) through any mailer configured in your app's `config/mail.php`, and receive inbound email + delivery events via a provider-agnostic webhook
+- **Unified API**: Single `Texto::send()` method works across all providers — pass a phone number or an email address as the recipient
+- **Address Validation**: Automatic E.164 formatting via libphonenumber and RFC-compliant email address validation
+- **Media Handling**: Support for multiple media URLs per message (attached as files for email)
 
 ### Reliability & Performance
 
@@ -130,6 +132,9 @@ php artisan texto:test-send +15551234567 "Hello from Texto"
 use Texto; // facade alias configured automatically
 
 Texto::send('+15551234567', 'Hello world');
+
+// Email works through the same API — just pass an email address
+Texto::send('jane@example.com', 'Hello world', ['driver' => 'email', 'subject' => 'Hi']);
 ```
 
 ---
@@ -209,7 +214,7 @@ This will send a test message using your configured provider and settings.
 
 ```env
 # Core
-TEXTO_DRIVER=twilio                 # twilio | telnyx | whatsapp
+TEXTO_DRIVER=twilio                 # twilio | telnyx | whatsapp | email
 TEXTO_STORE_MESSAGES=true           # disable to skip DB persistence
 TEXTO_QUEUE=false                   # true => SendMessageJob async
 TEXTO_RETRY_ATTEMPTS=3
@@ -255,6 +260,12 @@ WHATSAPP_APP_SECRET=...
 WHATSAPP_VERIFY_TOKEN=...
 WHATSAPP_FROM_NUMBER=+15550003333   # local sender record only
 WHATSAPP_HTTP_TIMEOUT=30            # seconds for outbound API calls
+
+# Email (uses your app's config/mail.php — no provider credentials needed here)
+TEXTO_EMAIL_MAILER=                 # named mailer to send through; empty = app default
+TEXTO_EMAIL_FROM_ADDRESS=           # default sender; empty = app's global mail.from
+TEXTO_EMAIL_FROM_NAME=
+TEXTO_EMAIL_DEFAULT_SUBJECT="New message"
 ```
 
 ---
@@ -267,7 +278,7 @@ After installation, you'll find the configuration file at `config/texto.php`. He
 
 | Key                 | Default    | Description                                          |
 | ------------------- | ---------- | ---------------------------------------------------- |
-| `driver`            | `'twilio'` | Active messaging provider (`'twilio'`, `'telnyx'`, or `'whatsapp'`) |
+| `driver`            | `'twilio'` | Active messaging provider (`'twilio'`, `'telnyx'`, `'whatsapp'`, or `'email'`) |
 | `store_messages`    | `true`     | Whether to persist messages in the database          |
 | `queue`             | `false`    | Enable async message sending via Laravel queues      |
 | `validation.region` | `'US'`     | Default region for parsing non‑E.164 phone numbers (`TEXTO_DEFAULT_REGION`) |
@@ -360,6 +371,23 @@ Telnyx API credentials, messaging profile configuration, the base64-encoded Ed25
 
 Configure `access_token`, `phone_number_id`, `app_secret`, and `verify_token` in the `whatsapp` block. WhatsApp uses Meta's signed webhook at `/texto/webhook/whatsapp` and does not support status polling. See the complete [WhatsApp Cloud API guide](docs/whatsapp.md) for setup, templates, media, and webhook configuration.
 
+### Email Configuration
+
+```php
+'email' => [
+    'mailer' => env('TEXTO_EMAIL_MAILER'),                 // named mailer from config/mail.php; null = app default
+    'from_address' => env('TEXTO_EMAIL_FROM_ADDRESS'),     // falls back to the app's global mail.from
+    'from_name' => env('TEXTO_EMAIL_FROM_NAME'),
+    'default_subject' => env('TEXTO_EMAIL_DEFAULT_SUBJECT', 'New message'),
+],
+```
+
+The email driver sends through the host application's own Laravel mailer, so **any transport your
+app can use — SMTP (Gmail, Zoho, Brevo), Amazon SES, Resend, Postmark, Mailgun, or even `log`/`array`
+for local development — works without adding a single package**. This makes it the cheapest way to
+reach users: pair it with a free/low-cost SMTP tier and you have two-way messaging on a shoestring.
+Inbound email and delivery events arrive via the `/texto/webhook/email` endpoint (see Webhooks).
+
 ### Testing Configuration
 
 ```php
@@ -401,6 +429,32 @@ $result = Texto::send('+15551234567', 'Check out this photo!', [
 ]);
 ```
 
+### Sending Email
+
+Pass an email address as the recipient (with `driver => 'email'`, or set `TEXTO_DRIVER=email`).
+The plain-text `$body` doubles as the fallback text part when an HTML body is supplied:
+
+```php
+$result = Texto::send('jane@example.com', 'Welcome to our service!', [
+    'driver' => 'email',
+    'subject' => 'Welcome aboard',
+    'html' => '<h1>Welcome!</h1><p>Great to have you.</p>',
+    'cc' => ['manager@example.com'],
+    'bcc' => ['audit@example.com'],
+    'reply_to' => 'support@example.com',
+    'attachments' => [
+        '/storage/docs/welcome.pdf',                                   // local path
+        ['url' => 'https://cdn.example.com/terms.pdf', 'name' => 'terms.pdf', 'mime' => 'application/pdf'],
+    ],
+]);
+
+// Display names are understood too:
+Texto::send('Jane Doe <jane@example.com>', 'Hi Jane', ['driver' => 'email']);
+```
+
+All other machinery — persistence, queueing (`TEXTO_QUEUE=true`), events, per-send
+`driver_config` overrides — works identically for email.
+
 ### Per-Message Driver Override
 
 Temporarily use a different provider for specific messages:
@@ -414,6 +468,12 @@ $result = Texto::send('+15551234567', 'Via Telnyx', [
 // Send via Meta's WhatsApp Cloud API (free-form messages require an open 24-hour service window)
 $result = Texto::send('+15551234567', 'Via WhatsApp', [
     'driver' => 'whatsapp',
+]);
+
+// Send an email through the app's configured mailer
+$result = Texto::send('jane@example.com', 'Via Email', [
+    'driver' => 'email',
+    'subject' => 'Hello',
 ]);
 ```
 
@@ -596,10 +656,25 @@ Auto‑registered routes:
 | Twilio   | `/texto/webhook/twilio`   | POST (inbound + status) |
 | Telnyx   | `/texto/webhook/telnyx`   | POST (inbound + status) |
 | WhatsApp | `/texto/webhook/whatsapp` | GET (Meta subscription verify handshake) + POST (inbound + status, batched) |
+| Email    | `/texto/webhook/email`    | POST (inbound + status, normalized payload, shared-secret authenticated) |
 
 Each provider publishes inbound and status callbacks to a **single endpoint**. Texto inspects each payload to determine whether it is an inbound message or a delivery status update, ensuring identical processing across providers. WhatsApp webhooks arrive batched; every entry in the batch is processed individually.
 
 Twilio Conversations events authored by your own configured `from_number` (the echo of a message Texto itself sent) are recognized as authentic and intentionally ignored, so outbound messages are never re‑recorded as inbound.
+
+**Email webhook.** Email has no universal provider signature scheme, so `/texto/webhook/email` is provider-agnostic: it authenticates with the shared `TEXTO_WEBHOOK_SECRET` (sent as the `X-Texto-Secret` header, or `?secret=...` in the URL for providers that cannot set headers) and **refuses every request when no secret is configured**. It accepts a normalized JSON payload, so you can wire up any inbound-mail provider (Mailgun Routes, SendGrid Inbound Parse, Postmark Inbound, SES→SNS, CloudMailin, ...) via a tiny transformer function/route in your app, or point providers with template support at it directly:
+
+```json
+// Inbound message
+{"event": "inbound", "message_id": "<id@mail.example.com>", "from": "Jane <jane@example.com>",
+ "to": "inbox@myapp.com", "subject": "Hello", "text": "Body", "html": "<p>Body</p>",
+ "attachments": ["https://storage.example.com/file.pdf"]}
+
+// Delivery/engagement status for a sent message (matched by provider message id)
+{"event": "status", "message_id": "<id@mail.example.com>", "status": "delivered", "error_code": null}
+```
+
+Recognized status values: `queued`, `deferred`, `sent`, `delivered`, `opened`/`clicked` (mapped to Read), `bounced`/`dropped`/`rejected` (Failed), `soft_bounce`/`temporary_fail` (Undelivered), `complained` (kept Delivered; raw value preserved in metadata). Inbound requests are idempotent on `message_id`, exactly like the SMS providers.
 
 Each request passes through `RateLimitTextoWebhook` – a per‑minute throttle (`webhook.rate_limit`). Authenticity is enforced by each provider's cryptographic signature inside the handler (Twilio `X-Twilio-Signature`, Telnyx Ed25519, Meta `X-Hub-Signature-256`). The `VerifyTextoWebhookSecret` middleware (`X-Texto-Secret` header, `TEXTO_WEBHOOK_SECRET`) is **not** attached to these routes — providers cannot send custom headers — it is shipped for guarding your own application‑defined endpoints.
 
@@ -614,9 +689,10 @@ Inbound payloads are normalized into `WebhookProcessingResult` then persisted vi
 | Twilio Signature     | `X-Twilio-Signature` validated (HMAC‑SHA1 over the full public URL + sorted POST params). Behind a TLS‑terminating proxy, configure `TrustProxies` so the public URL is reconstructed. |
 | Telnyx Signature     | Ed25519 signature validated against the Telnyx public webhook key (`ext-sodium`), with timestamp tolerance (`TELNYX_WEBHOOK_TOLERANCE`). |
 | WhatsApp Signature   | Meta's `X-Hub-Signature-256` (HMAC‑SHA256 of the raw body with `WHATSAPP_APP_SECRET`) validated; GET verify handshake uses `WHATSAPP_VERIFY_TOKEN`. |
+| Email Webhook Secret | `/texto/webhook/email` requires `TEXTO_WEBHOOK_SECRET` (header `X-Texto-Secret` or `?secret=` query param, compared with `hash_equals`); the endpoint rejects all traffic when no secret is configured. |
 | Shared Secret Header | `VerifyTextoWebhookSecret` middleware checks `X-Texto-Secret` against `TEXTO_WEBHOOK_SECRET` — for your own endpoints, not the packaged provider routes. |
 | Rate Limiting        | `RateLimitTextoWebhook` throttles every packaged webhook endpoint per minute.              |
-| Phone Parsing        | All numbers canonicalized using libphonenumber.                                            |
+| Address Parsing      | Phone numbers canonicalized using libphonenumber; email addresses validated and domain-normalized. |
 
 Signature validation can be skipped in test environments via `TEXTO_TESTING_SKIP_WEBHOOK_VALIDATION=true`.
 
@@ -685,15 +761,16 @@ No behavioral change is required for production usage; failures still fall back 
 `TextoException`. To add a genuinely new provider, add a `Driver` enum case (see below), not `extend()`.
 
 ```php
+use Awaisjameel\Texto\Contracts\AddressInterface;
 use Awaisjameel\Texto\Contracts\DriverManagerInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
-use Awaisjameel\Texto\ValueObjects\{PhoneNumber, SentMessageResult};
+use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Awaisjameel\Texto\Enums\{Driver, Direction, MessageStatus};
 
 // Override the sender resolved for the built-in 'twilio' driver.
 app(DriverManagerInterface::class)->extend('twilio', function () {
     return new class implements MessageSenderInterface {
-        public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult {
+        public function send(AddressInterface $to, string $body, ?AddressInterface $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult {
             // ...call provider API...
             return new SentMessageResult(
                 Driver::Twilio,
@@ -731,20 +808,25 @@ The main entry point for all messaging operations.
 
 #### `Texto::send(string $to, string $body, array $options = []): SentMessageResult`
 
-Send an SMS or MMS message.
+Send an SMS, MMS, WhatsApp, or Email message.
 
 **Parameters:**
 
-- `$to` (string): Recipient phone number (E.164 format or local format)
-- `$body` (string): Message text content
+- `$to` (string): Recipient phone number (E.164 format or local format) or email address (`jane@example.com` / `Jane <jane@example.com>`)
+- `$body` (string): Message text content (the plain-text part for email)
 - `$options` (array): Optional configuration
 
 **Options:**
 
-- `media_urls` (array): Array of media URLs for MMS
-- `from` (string): Override sender number
-- `driver` (string): Override provider ('twilio', 'telnyx', or 'whatsapp')
+- `media_urls` (array): Array of media URLs for MMS (attached as files for email)
+- `from` (string): Override sender number / email address
+- `driver` (string): Override provider ('twilio', 'telnyx', 'whatsapp', or 'email')
 - `metadata` (array): Custom metadata to store with message
+- `subject` (string, email only): Email subject; falls back to `texto.email.default_subject`
+- `html` (string, email only): HTML body; `$body` remains the plain-text part
+- `cc` / `bcc` (string[], email only): Carbon-copy recipients
+- `reply_to` (string, email only): Reply-To address
+- `attachments` (array, email only): Local paths, URLs, or `['path'|'url' => ..., 'name' => ..., 'mime' => ...]` entries
 - `driver_config` (array): Optional provider configuration snapshot (API keys, messaging profile IDs, etc.) that temporarily overrides `config('texto.{driver}')` for this send; primarily used by queued jobs or multi-tenant flows.
 
 > Note: When supplying `driver_config`, remember that any secrets included will travel with the queued job payload and logs you emit. Use encrypted queues or other safeguards appropriate for your environment.
@@ -762,12 +844,23 @@ $result = Texto::send('+15551234567', 'Hello!', [
 
 ### Value Objects
 
+#### AddressInterface
+
+Common contract for message endpoint addresses; implemented by `PhoneNumber` and `EmailAddress`.
+
+```php
+interface AddressInterface extends \Stringable
+{
+    public function value(): string; // E.164 for phones, bare mailbox for email
+}
+```
+
 #### PhoneNumber
 
 Represents a validated, E.164 formatted phone number.
 
 ```php
-class PhoneNumber
+final class PhoneNumber implements AddressInterface
 {
     public readonly string $e164;
 
@@ -778,7 +871,21 @@ class PhoneNumber
 **Methods:**
 
 - `fromString(string $raw, ?string $region = null)`: Parse and validate phone number
-- `__toString()`: Returns E.164 formatted number
+- `value()` / `__toString()`: Returns E.164 formatted number
+
+#### EmailAddress
+
+Represents a validated email address, optionally with a display name.
+
+```php
+final class EmailAddress implements AddressInterface
+{
+    public readonly string $address;      // bare mailbox, domain lowercased
+    public readonly ?string $displayName; // parsed from "Jane <jane@example.com>" input
+
+    public static function fromString(string $raw): self
+}
+```
 
 #### SentMessageResult
 
@@ -789,8 +896,8 @@ final class SentMessageResult implements Responsable, JsonSerializable
 {
     public readonly Driver $driver;
     public readonly Direction $direction;
-    public readonly PhoneNumber $to;
-    public readonly ?PhoneNumber $from;
+    public readonly AddressInterface $to;   // PhoneNumber or EmailAddress
+    public readonly ?AddressInterface $from;
     public readonly string $body;
     public readonly array $mediaUrls;
     public readonly array $metadata;
@@ -813,15 +920,15 @@ final class WebhookProcessingResult
 {
     public readonly Driver $driver;
     public readonly Direction $direction;
-    public readonly ?PhoneNumber $from;
-    public readonly ?PhoneNumber $to;
+    public readonly ?AddressInterface $from;
+    public readonly ?AddressInterface $to;
     public readonly ?string $body;
     public readonly array $mediaUrls;
     public readonly array $metadata;
     public readonly ?string $providerMessageId;
     public readonly ?MessageStatus $status;
 
-    public static function inbound(Driver $driver, PhoneNumber $from, PhoneNumber $to, ?string $body, array $media, array $metadata, ?string $providerMessageId = null): self
+    public static function inbound(Driver $driver, AddressInterface $from, AddressInterface $to, ?string $body, array $media, array $metadata, ?string $providerMessageId = null): self
     public static function status(Driver $driver, ?string $providerMessageId, MessageStatus $status, array $metadata = []): self
 }
 ```
@@ -857,6 +964,7 @@ enum Driver: string
     case Twilio = 'twilio';
     case Telnyx = 'telnyx';
     case Whatsapp = 'whatsapp';
+    case Email = 'email';
 }
 ```
 
@@ -946,9 +1054,12 @@ Contract for message sending implementations.
 ```php
 interface MessageSenderInterface
 {
-    public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult;
+    public function send(AddressInterface $to, string $body, ?AddressInterface $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult;
 }
 ```
+
+Drivers that only understand one address family narrow the address themselves and throw a
+`TextoSendFailedException` when handed the wrong kind (e.g. an email address to an SMS driver).
 
 #### MessageRepositoryInterface
 
@@ -1185,7 +1296,7 @@ A: Webhooks require public URLs for provider access.
 ### Extending Texto
 
 **Q: Adding a new provider (e.g., Vonage)**
-A: `extend()` only overrides the senders of built‑in drivers (`twilio`, `telnyx`, `whatsapp`); passing an
+A: `extend()` only overrides the senders of built‑in drivers (`twilio`, `telnyx`, `whatsapp`, `email`); passing an
 unrecognized name (such as `'vonage'`) throws a `TextoException`. A genuinely new provider needs its
 own `Driver` enum case so the manager can resolve it:
 
@@ -1194,7 +1305,7 @@ own `Driver` enum case so the manager can resolve it:
 // 2. Register the sender for that driver:
 app(DriverManagerInterface::class)->extend('vonage', function() {
     return new class implements MessageSenderInterface {
-        public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult {
+        public function send(AddressInterface $to, string $body, ?AddressInterface $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult {
             // Your implementation
         }
     };
@@ -1512,7 +1623,7 @@ Follow Laravel's coding standards with Pint configuration:
 
 ```php
 // Good: Use type hints and return types
-public function send(PhoneNumber $to, string $body): SentMessageResult
+public function send(AddressInterface $to, string $body): SentMessageResult
 
 // Good: Use enums for fixed values
 public function __construct(public readonly MessageStatus $status)
@@ -1767,6 +1878,13 @@ $result = Texto::send('+15551234567', 'Check this out!', [
 // Override provider per message
 $result = Texto::send('+15551234567', 'Via Telnyx', [
     'driver' => 'telnyx'
+]);
+
+// Email through your app's mailer
+$result = Texto::send('jane@example.com', 'Plain text body', [
+    'driver' => 'email',
+    'subject' => 'Hello',
+    'html' => '<p>Rich body</p>',
 ]);
 
 // Custom sender and metadata
