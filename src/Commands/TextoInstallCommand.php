@@ -8,25 +8,31 @@ use Illuminate\Console\Command;
 
 class TextoInstallCommand extends Command
 {
-    protected $signature = 'texto:install';
+    protected $signature = 'texto:install {--force : Overwrite published configuration and migrations}';
 
     protected $description = 'Publish Texto config and migrations';
 
     public function handle(): int
     {
-        $this->call('vendor:publish', [
+        if ($this->call('vendor:publish', [
             '--tag' => 'texto-config',
-            '--force' => true,
-        ]);
-        $this->call('vendor:publish', [
+            '--force' => (bool) $this->option('force'),
+        ]) !== self::SUCCESS) {
+            return self::FAILURE;
+        }
+        if ($this->call('vendor:publish', [
             '--tag' => 'texto-migrations',
-            '--force' => true,
-        ]);
+            '--force' => (bool) $this->option('force'),
+        ]) !== self::SUCCESS) {
+            return self::FAILURE;
+        }
         $this->info('Texto assets published.');
 
-        $this->call('migrate', [
+        if ($this->call('migrate', [
             '--force' => true,
-        ]);
+        ]) !== self::SUCCESS) {
+            return self::FAILURE;
+        }
         $this->info('Texto migration completed.');
 
         return self::SUCCESS;

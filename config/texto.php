@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use Awaisjameel\Texto\Support\ProviderHttp;
 
 return [
     'driver' => env('TEXTO_DRIVER', 'twilio'),
@@ -11,11 +12,7 @@ return [
         'backoff_start_ms' => env('TEXTO_RETRY_BACKOFF_START', 200),
     ],
     'twilio' => [
-        'base_urls' => [
-            'messaging' => 'https://api.twilio.com/2010-04-01',
-            'conversations' => 'https://conversations.twilio.com/v1',
-            'content' => 'https://content.twilio.com/v1',
-        ],
+        'base_urls' => ProviderHttp::TWILIO_BASE_URLS,
         'account_sid' => env('TWILIO_ACCOUNT_SID'),
         'auth_token' => env('TWILIO_AUTH_TOKEN'),
         'from_number' => env('TWILIO_FROM_NUMBER'),
@@ -28,6 +25,7 @@ return [
         // Optional explicit template SIDs (skip auto discovery/creation if provided)
         'sms_template_sid' => env('TWILIO_SMS_TEMPLATE_SID'),
         'mms_template_sid' => env('TWILIO_MMS_TEMPLATE_SID'),
+        'mms_media_base_url' => env('TWILIO_MMS_MEDIA_BASE_URL'),
         // Prefix used when creating conversations (FriendlyName). Kept short for readability.
         'conversation_prefix' => env('TWILIO_CONVERSATION_PREFIX', 'Texto'),
         // Default webhook URL for new Conversations (can be overridden per send via metadata['webhook_url'])
@@ -37,17 +35,18 @@ return [
         'conversation_cache_ttl' => env('TWILIO_CONVERSATION_CACHE_TTL', 604800),
     ],
     'telnyx' => [
-        'base_url' => env('TELNYX_BASE_URL', 'https://api.telnyx.com/v2/'),
+        'base_url' => env('TELNYX_BASE_URL', ProviderHttp::TELNYX_BASE_URL),
         'api_key' => env('TELNYX_API_KEY'),
         'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
         'from_number' => env('TELNYX_FROM_NUMBER'),
-        'webhook_secret' => env('TELNYX_WEBHOOK_SECRET'),
+        // Telnyx's Ed25519 public verification key (not an API key or shared secret).
+        'webhook_secret' => env('TELNYX_PUBLIC_KEY', env('TELNYX_WEBHOOK_SECRET')),
         'webhook_tolerance_seconds' => env('TELNYX_WEBHOOK_TOLERANCE', 300),
         'timeout' => env('TELNYX_HTTP_TIMEOUT', 30),
     ],
     'whatsapp' => [
         // Deliberately pin the Graph API version; upgrade only after reviewing Meta's changelog.
-        'base_url' => env('WHATSAPP_BASE_URL', 'https://graph.facebook.com/v25.0/'),
+        'base_url' => env('WHATSAPP_BASE_URL', ProviderHttp::WHATSAPP_BASE_URL),
         'access_token' => env('WHATSAPP_ACCESS_TOKEN'),
         'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
         'app_secret' => env('WHATSAPP_APP_SECRET'),
@@ -55,6 +54,16 @@ return [
         // Used only to populate the local message record; Meta derives the sender from phone_number_id.
         'from_number' => env('WHATSAPP_FROM_NUMBER'),
         'timeout' => env('WHATSAPP_HTTP_TIMEOUT', 30),
+    ],
+    'email' => [
+        // Named mailer from the host app's config/mail.php to send through (smtp, ses, resend,
+        // postmark, log, ...). Null uses the app's default mailer — no extra package needed.
+        'mailer' => env('TEXTO_EMAIL_MAILER'),
+        // Default sender. Falls back to the app's global mail.from when left empty.
+        'from_address' => env('TEXTO_EMAIL_FROM_ADDRESS'),
+        'from_name' => env('TEXTO_EMAIL_FROM_NAME'),
+        // Used when a send does not provide a 'subject' option.
+        'default_subject' => env('TEXTO_EMAIL_DEFAULT_SUBJECT', 'New message'),
     ],
     'webhook' => [
         'secret' => env('TEXTO_WEBHOOK_SECRET'),

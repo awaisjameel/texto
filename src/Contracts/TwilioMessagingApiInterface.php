@@ -18,7 +18,7 @@ interface TwilioMessagingApiInterface
      * @param  string|null  $body  Optional text body (required if no media/content template)
      * @param  array<string>  $mediaUrls  Array of media URLs (max 10)
      * @param  array<string,mixed>  $options  Additional API parameters (StatusCallback, SmartEncoded, etc.)
-     * @return array Raw decoded JSON (or associative array) response
+     * @return array<string, mixed> Raw decoded JSON (or associative array) response
      */
     public function sendMessage(string $to, string $from, ?string $body, array $mediaUrls = [], array $options = []): array;
 
@@ -26,7 +26,7 @@ interface TwilioMessagingApiInterface
      * Fetch a message resource by SID.
      *
      * @param  string  $messageSid  SM/ MM SID
-     * @return array Raw decoded JSON
+     * @return array<string, mixed> Raw decoded JSON
      */
     public function fetchMessage(string $messageSid): array;
 }

@@ -78,7 +78,7 @@ it('still maps conversation events from other authors as inbound', function () {
 
 it('parses inbound message', function () {
     $url = 'https://example.com/texto/webhook/twilio';
-    $params = ['From' => '+15551234567', 'To' => '+15550001111', 'Body' => 'Hi', 'MediaUrl0' => 'https://x/img.jpg', 'NumMedia' => 1];
+    $params = ['From' => '+15551234567', 'To' => '+15550001111', 'Body' => 'Hi', 'MediaUrl0' => 'https://x/img.jpg', 'NumMedia' => 1, 'MessageSid' => 'SMINBOUND'];
     $sig = sign($params, 'auth-token', $url);
     $request = Request::create($url, 'POST', $params, [], [], ['HTTP_X_TWILIO_SIGNATURE' => $sig]);
     config()->set('texto.twilio.auth_token', 'auth-token');

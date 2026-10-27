@@ -1,86 +1,41 @@
-# Migration from twilio/sdk to Direct REST
+# Upgrading to Texto 4
 
-## WhatsApp driver (additive)
+Version 4 is a major release. Read this before updating workers or processing new messages.
 
-The WhatsApp Cloud API driver is additive. If you have published `config/texto.php`, merge in the new `whatsapp` configuration block and set its environment variables before selecting `TEXTO_DRIVER=whatsapp`. Its webhook endpoint (`/texto/webhook/whatsapp`) intentionally bypasses `X-Texto-Secret`: Meta authenticates the raw body with `X-Hub-Signature-256` and `WHATSAPP_APP_SECRET` instead.
+1. Use PHP 8.2-8.5 and Laravel 12/13 (Laravel 13 needs PHP 8.3+). Enable Sodium. Update Composer dependencies; older Laravel/PHP support is removed.
+2. Pause send/poll workers during deployment. Back up the database and retain `APP_KEY`. Publish `texto-migrations`, review the new `upgrade_texto_message_credentials` migration, and run `php artisan migrate --force` before resuming sends. It adds nullable TEXT `driver_config` to the existing table. Do not recreate the original messages table.
+3. Merge new keys from `config/texto.php` into published configuration. `texto:install` now preserves existing files by default and returns nonzero on publishing/migration failure. `--force` overwrites published files and should be deliberate.
+4. Every newly stored outbound message has an encrypted effective configuration snapshot; jobs are also encrypted. All worker processes need the same encryption key. Keep previous keys available during rotation. Old rows without snapshots fall back to current configuration. Do not expose/decrypt credentials in API resources or logs.
+5. Restart workers. Send jobs have one queue attempt, a ledger overlap lock, and skip rows already accepted/terminal. An unexpected failed job with no confirmed provider ID becomes `Ambiguous`. Reconcile unknown outcomes instead of blindly retrying a send. Coordinate queue `retry_after`, worker timeouts and shared cache locks. Jobs queued by older versions may lack snapshots; drain/reconcile them before switching.
+6. Check Twilio media/templates and webhook setup below. Unsupported Conversations media now fails clearly instead of losing attachments or changing providers.
 
-The current WhatsApp configuration defaults to Graph API `v25.0`. If you override `WHATSAPP_BASE_URL`, update it to a supported Graph version. WhatsApp delivery receipts now preserve `read` as a distinct status. Meta webhook retries are deduplicated using the provider message ID; multi-node deployments should use a shared, lock-capable cache such as Redis.
+## Configuration and integration changes
 
-This document summarizes the transition removing the `twilio/sdk` dependency in favor of Laravel's HTTP client with first-class adapters.
+- Effective `driver_config` is isolated to each sender. No temporary global configuration mutation remains. Overrides also work when `driver` is omitted. Default sender resolution uses the effective configuration.
+- `DriverManagerInterface::sender(?Driver $driver = null, ?array $configuration = null)` now accepts an explicit snapshot. Extension factories receive that effective array. Update custom manager implementations.
+- `MessageRepositoryInterface::storeSent(SentMessageResult $result, ?array $configuration = null)` and `upgradeQueued(int $id, SentMessageResult $result, ?array $configuration = null)` now accept the configuration snapshot. Custom repositories must implement these signatures and protect secrets equivalently.
+- `MessageSenderInterface::send()` accepts `AddressInterface` for recipient/sender. `PhoneNumber` and `EmailAddress` implement it. Use `value()` for portable addresses; reject unsupported address families in custom senders.
+- Provider API adapters are no longer container singletons. Construct them per sender or inject an adapter into the sender constructor. Optional explicit configuration is captured on construction, including endpoint and timeout settings.
+- `WebhookHandlerInterface::handle()` can return null for intentionally ignored authentic events (such as outbound Conversations echoes).
+- `Message::$cost_estimate` is a decimal string; `segments` is an integer. `driver_config` is hidden from array/JSON serialization.
+- Only known `Driver` enum values can be overridden; registering an unreachable arbitrary driver name throws.
 
-## Summary
+## Provider behavior
 
-- Removed `twilio/sdk` from `composer.json`.
-- Added HTTP macro `Http::twilio()` for consistent auth + base URL handling.
-- Implemented adapter interfaces:
-  - `TwilioMessagingApiInterface`
-  - `TwilioConversationsApiInterface`
-  - `TwilioContentApiInterface`
-- Concrete implementations live under `src/Support/*Api.php` using `Http`.
-- Refactored `TwilioSender` to consume adapters instead of SDK client objects.
-- Replaced `Twilio\Security\RequestValidator` with custom `TwilioSignatureValidator` (HMAC-SHA1).
-- Added granular exception hierarchy (`TwilioApi*Exception`) for clearer error handling.
-- Updated webhook handler to use new signature validator.
-- Added tests covering messaging, conversations, content templates, and webhook validation.
+- Telnyx signature verification now follows the actual protocol: `telnyx-signature-ed25519`, `telnyx-timestamp`, signed bytes `timestamp|raw-body`, and a base64 Ed25519 public key. Configure `TELNYX_PUBLIC_KEY`; the old `TELNYX_WEBHOOK_SECRET` variable is only a fallback name for that public key. Never substitute the API key.
+- Twilio signs raw form values/full request URLs, or raw JSON via `bodySHA256`. Configure trusted proxies correctly and retain query encoding. Conversations `Media` JSON strings are decoded; media objects remain in metadata even when Twilio supplies a media SID rather than a URL.
+- Twilio Conversations sends allow one media URL under `TWILIO_MMS_MEDIA_BASE_URL` (fallback `app.url`) and a caption up to 500 characters. Templates use `media_path` relative to that base, preserving nested paths/query encoding. Regenerate or explicitly configure an MMS template matching that base/path variable. Unsupported remote hosts, extra attachments, or missing templates fail instead of sending body-only or silently using classic Messages.
+- Content requests use documented snake_case JSON. Failed lookup is not treated as permission to create another template. All relevant list pages are checked, and pagination cannot forward credentials to a foreign origin.
+- Conversation-scoped webhooks preserve all other destinations and update only an exact URL match. Changing your URL leaves the old destination for explicit application cleanup. No implicit historical replay occurs. Texto does not modify global/service webhook settings.
+- Delivery aggregation accepts any delivered/read recipient; it fails only if all recipients fail. Mixed failure summaries use individual receipt pages. Signed `onDeliveryUpdated` callbacks are supported; configure the service/global post-action event explicitly for that endpoint. Individual failures are checked against the aggregate.
+- Unknown/ambiguous Conversations send outcomes do not trigger a duplicate fresh-conversation send or destructive cleanup. Only a known missing cached conversation triggers a fresh setup; only definitive client rejection permits cleanup.
+- WhatsApp defaults to Graph API v26.0. Existing `WHATSAPP_BASE_URL` overrides remain explicit application choices. Provider permissions/templates/service windows still apply.
+- Email uses the application's existing mail transport. Named addresses survive queueing, cancelled transport fails clearly, and its normalized webhook requires `TEXTO_WEBHOOK_SECRET` (prefer `X-Texto-Secret`).
 
-## New Error Handling Strategy
+## Data and event behavior
 
-Responses are inspected for HTTP status and Twilio error `code` field.
+Failed queued sends upgrade the original ledger row instead of adding another row and leaving the first queued. Status writes reload/lock the row and share forward-only progression with polling. Inbound IDs are scoped by provider and direction; missing IDs cannot provide deduplication. With `store_messages=false`, callbacks emit DTO events without touching the database and applications own deduplication.
 
-- 400 -> Validation (`TwilioApiValidationException`)
-- 401/403 -> Auth (`TwilioApiAuthException`)
-- 404 -> Not Found (`TwilioApiNotFoundException`)
-- 429 -> Rate Limit (`TwilioApiRateLimitException`)
-- Other -> Generic (`TwilioApiException`)
+Polling applies batch limits to eligible rows, not exhausted or cooling-down rows, and records failed lookup attempts. Scheduler and queued execution both use overlap protection. Review new regression tests alongside your own provider/account/database integration tests before deployment.
 
-Retry/backoff uses existing `Retry::exponential` with values sourced from `config('texto.twilio.retry.*')` (fallback to `texto.retry`).
-
-## Signature Validation
-
-Previous SDK logic: `RequestValidator`.
-Now: `TwilioSignatureValidator::validate($token, $url, $params, $signature)`.
-Ordering rule: ASCII sort keys, append key+value to URL, HMAC-SHA1, Base64 encode.
-
-## Conversation Flow Changes
-
-- Conversation creation, participant add, message send, webhook attach now pure REST endpoints.
-- Duplicate participant detection relies on Twilio error `code` 50416; conversation SID parsed from error message (logic retained).
-
-## Content Templates
-
-- Template ensure logic moved to `TwilioContentApi`.
-- Fallback casing attempts (snake_case and TitleCase) preserved.
-
-## Testing Strategy
-
-Uses `Http::fake()` with URL pattern matching for Twilio endpoints:
-
-- `api.twilio.com/2010-04-01/Accounts/*/Messages.json`
-- `conversations.twilio.com/v1/...`
-- `content.twilio.com/v1/Content`
-
-## How to Upgrade
-
-1. Remove `twilio/sdk` from your downstream app `composer.json` if explicitly required.
-2. Publish new config (already auto-published via `texto:install`): `config/twilio.php`.
-3. Set environment variables:
-   ```env
-   TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-   TWILIO_AUTH_TOKEN=your_auth_token
-   TWILIO_FROM_NUMBER=+15550001111
-   ```
-4. Run tests to verify functionality: `composer test`.
-
-## Potential Follow-ups
-
-- Implement rate limit adaptive backoff (inspect `TwilioApiRateLimitException`).
-- Add caching layer for Content template lookups.
-- Provide optional async dispatch for Conversations create + send.
-
-## Rollback Plan
-
-If any issue arises, re-add `"twilio/sdk": "^8.8"` and revert `TwilioSender` to prior implementation (git revert commit). All adapters are additive and can coexist temporarily.
-
----
-
-This migration reduces dependency surface, improves testability, and keeps feature parity with the former SDK implementation.
+Historical changes remain in [CHANGELOG.md](CHANGELOG.md); the previous SDK-specific migration notes are superseded by the current adapter/configuration contracts above.

@@ -10,9 +10,8 @@ use Illuminate\Http\Request;
 class TextoWebhookValidationException extends TextoException
 {
     /**
-     * HTTP status returned to the provider. A 4xx tells Twilio/Telnyx the request is
-     * permanently unacceptable (bad signature / malformed payload) so they stop retrying,
-     * instead of an unhandled 500 that triggers retry storms.
+     * Explicit validation status for a bad signature or malformed payload.
+     * Provider retry policies vary; the response does not guarantee retries stop.
      */
     public int $statusCode = 403;
 

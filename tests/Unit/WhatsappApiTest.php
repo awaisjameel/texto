@@ -15,7 +15,7 @@ beforeEach(function () {
 });
 
 it('sends a Graph API message and returns the decoded response', function () {
-    Http::fake(['https://graph.facebook.com/v25.0/phone-id/messages' => Http::response([
+    Http::fake(['https://graph.facebook.com/v26.0/phone-id/messages' => Http::response([
         'contacts' => [['wa_id' => '923001234567']],
         'messages' => [['id' => 'wamid.123', 'message_status' => 'accepted']],
     ])]);

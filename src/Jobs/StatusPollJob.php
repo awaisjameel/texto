@@ -10,12 +10,15 @@ use Awaisjameel\Texto\Contracts\PollableMessageSenderInterface;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Models\Message;
+use Awaisjameel\Texto\Support\Configuration;
 use Awaisjameel\Texto\Support\PollingParameterResolver;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\LazyCollection;
 
 /**
  * Poll provider APIs for messages stuck in transient states (queued/sending/sent) when webhooks are delayed or absent.
@@ -24,6 +27,12 @@ class StatusPollJob implements ShouldQueue
 {
     use Dispatchable, Queueable;
 
+    /** @return list<WithoutOverlapping> */
+    public function middleware(): array
+    {
+        return [(new WithoutOverlapping('texto-status-poll'))->dontRelease()->expireAfter(180)];
+    }
+
     public function handle(MessageRepositoryInterface $messages, DriverManagerInterface $drivers): void
     {
         $enabled = config('texto.status_polling.enabled', false);
@@ -31,11 +40,16 @@ class StatusPollJob implements ShouldQueue
             return;
         }
 
-        $minAge = (int) config('texto.status_polling.min_age_seconds', 60);
-        $maxAttempts = (int) config('texto.status_polling.max_attempts', 5);
-        $queuedMaxAttempts = (int) config('texto.status_polling.queued_max_attempts', 2);
-        $backoff = (int) config('texto.status_polling.backoff_seconds', 300);
-        $batch = (int) config('texto.status_polling.batch_limit', 100);
+        $values = config('texto.status_polling', []);
+        if (! is_array($values)) {
+            throw new \InvalidArgumentException('Status polling configuration must be an array.');
+        }
+        $settings = new Configuration($values);
+        $minAge = $settings->integer('min_age_seconds', 60);
+        $maxAttempts = $settings->integer('max_attempts', 5, 1);
+        $queuedMaxAttempts = $settings->integer('queued_max_attempts', 2, 1);
+        $backoff = $settings->integer('backoff_seconds', 300);
+        $batch = $settings->integer('batch_limit', 100, 1);
 
         $transientStatuses = [
             MessageStatus::Queued->value,
@@ -43,35 +57,27 @@ class StatusPollJob implements ShouldQueue
             MessageStatus::Sent->value,
         ];
 
-        // First pass: poll messages without provider IDs (queued/sending states)
-        $query = Message::query()
-            ->whereIn('status', $transientStatuses)
-            ->where('created_at', '<=', now()->subSeconds($minAge))
-            ->whereNull('provider_message_id')
-            ->orderBy('id', 'asc')
-            ->limit($batch);
-
-        $candidates = $query->get();
-
-        // Second pass: poll messages with provider IDs if we have capacity
-        if ($candidates->count() < $batch) {
-            $remainingCapacity = $batch - $candidates->count();
-            $secondQuery = Message::query()
-                ->whereIn('status', $transientStatuses)
-                ->where('created_at', '<=', now()->subSeconds($minAge))
-                ->whereNotNull('provider_message_id')
-                ->orderBy('id', 'asc')
-                ->limit($remainingCapacity);
-
-            $candidates = $candidates->merge($secondQuery->get());
-        }
-
-        if ($candidates->isEmpty()) {
-            return;
-        }
-
+        // Apply the batch limit to eligible polls, not the oldest unconditionally
+        // selected rows: exhausted or cooling-down rows must not starve newer messages.
+        $candidates = LazyCollection::make(function () use ($transientStatuses, $minAge, $batch) {
+            foreach ([true, false] as $missingId) {
+                $query = Message::query()->whereIn('status', $transientStatuses)
+                    ->where('created_at', '<=', now()->subSeconds($minAge));
+                $missingId ? $query->whereNull('provider_message_id') : $query->whereNotNull('provider_message_id');
+                yield from $query->lazyById($batch);
+            }
+        });
+        $checkedCount = 0;
         $polledCount = 0;
         foreach ($candidates as $message) {
+            if ($polledCount >= $batch) {
+                break;
+            }
+            $checkedCount++;
+            $currentStatus = MessageStatus::tryFrom($message->status ?? '');
+            if ($currentStatus === null) {
+                continue;
+            }
             $meta = $message->metadata ?? [];
             $attempts = (int) ($meta['poll_attempts'] ?? 0);
             $lastPollAt = $meta['last_poll_at'] ?? null;
@@ -98,7 +104,13 @@ class StatusPollJob implements ShouldQueue
             } catch (\Throwable $e) {
                 continue;
             }
-            $sender = $drivers->sender($driverEnum);
+            try {
+                $sender = $drivers->sender($driverEnum, $message->driver_config);
+            } catch (\Throwable $exception) {
+                report($exception);
+
+                continue;
+            }
             if (! $sender instanceof PollableMessageSenderInterface) {
                 continue;
             }
@@ -169,6 +181,8 @@ class StatusPollJob implements ShouldQueue
                 $fetched = $sender->fetchStatus($providerArgument, ...$args);
                 $newStatus = $fetched;
             } catch (\Throwable $e) {
+                $messages->updatePolledStatus($message, $currentStatus, ['poll_note' => 'fetch-failed']);
+                $polledCount++;
                 Log::warning('Status poll fetch failed', [
                     'driver' => $message->driver,
                     'provider_id' => $providerId,
@@ -180,7 +194,7 @@ class StatusPollJob implements ShouldQueue
 
             if (! $newStatus) {
                 // Increment attempt even if no status returned
-                $messages->updatePolledStatus($message, MessageStatus::from($message->status), [
+                $messages->updatePolledStatus($message, $currentStatus, [
                     'poll_note' => 'no-status-returned',
                 ]);
                 $polledCount++;
@@ -192,7 +206,7 @@ class StatusPollJob implements ShouldQueue
             // authoritative and always stored; transient states only advance the row (never regress).
             // Ranking/terminal logic lives on the MessageStatus enum so this stays in lock-step with
             // the webhook persistence path. Metadata flag 'poll_promoted' marks a transient advancement.
-            $current = MessageStatus::from($message->status);
+            $current = $currentStatus;
             $terminal = $newStatus->isTerminal();
             $progression = $newStatus->rank() > $current->rank();
             $statusToStore = $terminal
@@ -215,7 +229,7 @@ class StatusPollJob implements ShouldQueue
 
         if ($polledCount > 0) {
             Log::info('Texto status polling run completed', [
-                'checked' => $candidates->count(),
+                'checked' => $checkedCount,
                 'polled' => $polledCount,
             ]);
         }

@@ -6,6 +6,7 @@ use Awaisjameel\Texto\Events\MessageReceived;
 use Awaisjameel\Texto\Events\MessageStatusUpdated;
 use Awaisjameel\Texto\Http\Middleware\RateLimitTextoWebhook;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
+use Awaisjameel\Texto\Webhooks\EmailWebhookHandler;
 use Awaisjameel\Texto\Webhooks\TelnyxWebhookHandler;
 use Awaisjameel\Texto\Webhooks\TwilioWebhookHandler;
 use Awaisjameel\Texto\Webhooks\WhatsappWebhookHandler;
@@ -13,6 +14,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 $processWebhook = function (WebhookProcessingResult $result, MessageRepositoryInterface $repo): void {
+    if (! config('texto.store_messages', true)) {
+        event($result->direction === Direction::Received ? new MessageReceived($result) : new MessageStatusUpdated($result));
+
+        return;
+    }
     if ($result->direction === Direction::Received) {
         $message = $repo->storeInbound($result);
         if ($message->wasRecentlyCreated) {
@@ -47,16 +53,28 @@ Route::middleware([RateLimitTextoWebhook::class])
         return response()->json(['ok' => true]);
     })->name('texto.webhook.telnyx');
 
+// Email has no universal provider signature scheme; the handler authenticates the request
+// itself with the shared texto.webhook.secret (X-Texto-Secret header or ?secret= query param).
+Route::middleware([RateLimitTextoWebhook::class])
+    ->post('/texto/webhook/email', function (Request $request, EmailWebhookHandler $handler, MessageRepositoryInterface $repo) use ($processWebhook) {
+        $processWebhook($handler->handle($request), $repo);
+
+        return response()->json(['ok' => true]);
+    })->name('texto.webhook.email');
+
 // Meta validates subscriptions with this GET handshake. It cannot send Texto's shared secret.
 Route::middleware([RateLimitTextoWebhook::class])
     ->get('/texto/webhook/whatsapp', function (Request $request) {
-        $verifyToken = (string) config('texto.whatsapp.verify_token');
+        $verifyToken = config('texto.whatsapp.verify_token');
+        $provided = $request->query('hub_verify_token');
+        $challenge = $request->query('hub_challenge');
         if (
-            $verifyToken !== ''
+            is_string($verifyToken) && $verifyToken !== ''
             && $request->query('hub_mode') === 'subscribe'
-            && hash_equals($verifyToken, (string) $request->query('hub_verify_token'))
+            && is_string($provided) && hash_equals($verifyToken, $provided)
+            && is_string($challenge)
         ) {
-            return response((string) $request->query('hub_challenge'), 200)
+            return response($challenge, 200)
                 ->header('Content-Type', 'text/plain');
         }
 

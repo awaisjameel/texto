@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto\Drivers;
 
+use Awaisjameel\Texto\Contracts\AddressInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
 use Awaisjameel\Texto\Contracts\PollableMessageSenderInterface;
 use Awaisjameel\Texto\Contracts\TelnyxMessagingApiInterface;
@@ -22,22 +23,29 @@ use Illuminate\Support\Facades\Log;
 
 class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInterface
 {
+    use Concerns\ExpectsPhoneNumbers;
+
     protected TelnyxMessagingApiInterface $messagingApi;
 
+    /**
+     * @param  array<string, mixed>  $config
+     */
     public function __construct(protected array $config, ?TelnyxMessagingApiInterface $messagingApi = null)
     {
         $apiKey = $this->config['api_key'] ?? null;
         if (! $apiKey) {
             throw new TextoSendFailedException('Telnyx API key missing.');
         }
-        $this->messagingApi = $messagingApi ?? new TelnyxMessagingApi($apiKey);
+        $this->messagingApi = $messagingApi ?? new TelnyxMessagingApi($apiKey, $config);
     }
 
     /**
      * @param  string[]  $mediaUrls
      */
-    public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
+    public function send(AddressInterface $to, string $body, ?AddressInterface $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
     {
+        $to = $this->assertPhoneNumber($to, 'Telnyx', 'to');
+        $from = $from !== null ? $this->assertPhoneNumber($from, 'Telnyx', 'from') : null;
         $fromNumber = $from ? $from->e164 : ($this->config['from_number'] ?? null);
         $profileId = $this->config['messaging_profile_id'] ?? null;
         if (! $fromNumber || ! $profileId) {

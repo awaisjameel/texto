@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto\Drivers;
 
+use Awaisjameel\Texto\Contracts\AddressInterface;
 use Awaisjameel\Texto\Contracts\MessageSenderInterface;
 use Awaisjameel\Texto\Contracts\WhatsappApiInterface;
 use Awaisjameel\Texto\Enums\Direction;
@@ -22,8 +23,13 @@ use Illuminate\Support\Facades\Log;
 
 class WhatsappSender implements MessageSenderInterface
 {
+    use Concerns\ExpectsPhoneNumbers;
+
     protected WhatsappApiInterface $api;
 
+    /**
+     * @param  array<string, mixed>  $config
+     */
     public function __construct(protected array $config, ?WhatsappApiInterface $api = null)
     {
         $token = $this->config['access_token'] ?? null;
@@ -35,12 +41,14 @@ class WhatsappSender implements MessageSenderInterface
         // Do not resolve the globally-bound API adapter here: callers can override credentials
         // per send, and a singleton would silently send with another tenant's credentials.
         // Tests and custom integrations can still inject an adapter explicitly.
-        $this->api = $api ?? new WhatsappApi((string) $token, (string) $phoneNumberId);
+        $this->api = $api ?? new WhatsappApi((string) $token, (string) $phoneNumberId, $config);
     }
 
     /** @param array<int, mixed> $mediaUrls */
-    public function send(PhoneNumber $to, string $body, ?PhoneNumber $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
+    public function send(AddressInterface $to, string $body, ?AddressInterface $from = null, array $mediaUrls = [], array $metadata = []): SentMessageResult
     {
+        $to = $this->assertPhoneNumber($to, 'WhatsApp', 'to');
+        $from = $from !== null ? $this->assertPhoneNumber($from, 'WhatsApp', 'from') : null;
         $payload = $this->buildPayload($to, $body, $mediaUrls, $metadata);
 
         try {

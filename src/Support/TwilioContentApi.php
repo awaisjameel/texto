@@ -5,42 +5,35 @@ declare(strict_types=1);
 namespace Awaisjameel\Texto\Support;
 
 use Awaisjameel\Texto\Contracts\TwilioContentApiInterface;
-use Awaisjameel\Texto\Exceptions\TwilioApiException;
+use Awaisjameel\Texto\Enums\Driver;
 use Illuminate\Http\Client\PendingRequest;
-use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
-use Throwable;
 
 class TwilioContentApi implements TwilioContentApiInterface
 {
-    public function __construct(protected string $accountSid, protected string $authToken)
+    /** @var array<string, mixed> */
+    protected array $config;
+
+    /** @param array<string, mixed>|null $config */
+    public function __construct(protected string $accountSid, protected string $authToken, ?array $config = null)
     {
         if ($accountSid === '' || $authToken === '') {
             throw new \InvalidArgumentException('TwilioContentApi requires non-empty credentials.');
         }
+        $this->config = array_replace($config ?? Configuration::forDriver(Driver::Twilio), ['account_sid' => $accountSid, 'auth_token' => $authToken]);
     }
 
     protected function http(): PendingRequest
     {
-        return Http::twilio('content')->withBasicAuth($this->accountSid, $this->authToken);
+        return ProviderHttp::twilio('content', $this->config);
     }
 
     public function findTemplateByFriendlyName(string $friendlyName): ?array
     {
-        try {
-            $response = $this->http()->get('/Content', ['FriendlyName' => $friendlyName]);
-        } catch (Throwable $e) {
-            Log::warning('Twilio Content API query failed', ['friendly_name' => $friendlyName, 'error' => $e->getMessage()]);
-            throw new TwilioApiException('Unable to query Twilio Content templates.', 0, null, ['friendly_name' => $friendlyName]);
-        }
-        if ($response->failed()) {
-            Log::error('Twilio Content API search error', ['friendly_name' => $friendlyName, 'status' => $response->status(), 'body' => $response->body()]);
-            throw new TwilioApiException('Content template search failed.', $response->status());
-        }
-        $records = $response->json('contents') ?? [];
-        foreach ($records as $record) {
-            if (strcasecmp(Arr::get($record, 'friendly_name', ''), $friendlyName) === 0) {
+        foreach (TwilioPaginator::records($this->http(), ProviderHttp::twilioBaseUrl('content', $this->config), '/Content', 'contents') as $record) {
+            $name = $record['friendly_name'] ?? null;
+            if (is_string($name) && strcasecmp($name, $friendlyName) === 0) {
+                JsonResponse::requiredText($record, 'sid');
+
                 return $record;
             }
         }
@@ -50,88 +43,21 @@ class TwilioContentApi implements TwilioContentApiInterface
 
     public function createTemplate(array $definition): string
     {
-        $snake = $definition;
-        $title = $this->convertPayloadToTitleCase($definition);
-        $attempts = [
-            ['variant' => 'snake_case', 'body' => $snake],
-            ['variant' => 'TitleCase', 'body' => $title],
-        ];
-        foreach ($attempts as $attempt) {
-            try {
-                $response = $this->http()->post('/Content', $attempt['body']);
-            } catch (Throwable $e) {
-                Log::warning('Twilio Content template create HTTP exception', ['variant' => $attempt['variant'], 'error' => $e->getMessage()]);
+        // The documented Content API accepts snake_case JSON. Retrying an uncertain
+        // creation with a second key-casing variant can create duplicate templates.
+        $response = $this->http()->post('/Content', $definition);
+        $data = TwilioResponse::read($response, 'createTemplate', requiredField: 'sid');
 
-                continue;
-            }
-            if ($response->successful()) {
-                $payload = $response->json();
-                $sid = $payload['sid'] ?? $response->json('sid');
-                if (! $sid) {
-                    // Fall back to the search-style payload shape ({ contents: [...] }).
-                    $records = $payload['contents'] ?? [];
-                    if (is_array($records)) {
-                        foreach ($records as $record) {
-                            if (is_array($record) && isset($record['sid'])) {
-                                $sid = $record['sid'];
-                                break;
-                            }
-                        }
-                    }
-                }
-                if ($sid) {
-                    Log::info('Twilio Content template created', ['friendly_name' => $definition['friendly_name'] ?? null, 'sid' => $sid, 'variant' => $attempt['variant']]);
-
-                    return $sid;
-                }
-                Log::error('Twilio Content success response missing SID', ['variant' => $attempt['variant'], 'body' => $response->body()]);
-
-                continue;
-            }
-            // Don't throw yet: let the next key-casing variant try before giving up.
-            Log::warning('Twilio Content template create failed variant', [
-                'variant' => $attempt['variant'],
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
-        }
-        throw new TwilioApiException('Unable to create Twilio Content template after retries.');
+        return JsonResponse::requiredText($data, 'sid');
     }
 
     public function ensureTemplate(string $friendlyName, callable $definitionFactory): string
     {
-        $existing = null;
-        try {
-            $existing = $this->findTemplateByFriendlyName($friendlyName);
-        } catch (Throwable $e) {
-            Log::debug('Proceeding to create template due to lookup failure.', ['friendly_name' => $friendlyName]);
-        }
-        if ($existing) {
-            $sid = Arr::get($existing, 'sid');
-            if ($sid) {
-                Log::info('Reusing existing Twilio Content template', ['friendly_name' => $friendlyName, 'sid' => $sid]);
-
-                return $sid;
-            }
-        }
-        $definition = $definitionFactory();
-
-        return $this->createTemplate($definition);
-    }
-
-    protected function convertPayloadToTitleCase(array $payload): array
-    {
-        $map = [
-            'friendly_name' => 'FriendlyName',
-            'language' => 'Language',
-            'variables' => 'Variables',
-            'types' => 'Types',
-        ];
-        $out = [];
-        foreach ($payload as $k => $v) {
-            $out[$map[$k] ?? $k] = $v;
+        $existing = $this->findTemplateByFriendlyName($friendlyName);
+        if ($existing !== null) {
+            return JsonResponse::requiredText($existing, 'sid');
         }
 
-        return $out;
+        return $this->createTemplate($definitionFactory());
     }
 }
