@@ -14,13 +14,14 @@ interface DriverManagerInterface
      *
      * @param  Driver|null  $driver  The driver to use, or null for default
      */
-    public function sender(?Driver $driver = null): MessageSenderInterface;
+    /** @param array<string, mixed>|null $configuration Effective per-message configuration. */
+    public function sender(?Driver $driver = null, ?array $configuration = null): MessageSenderInterface;
 
     /**
      * Override a built-in driver's sender with a custom implementation.
      *
      * @param  string  $name  Driver name; must match a recognized Driver enum value (e.g. "twilio", "telnyx")
-     * @param  callable():MessageSenderInterface  $factory  Factory function returning sender instance
+     * @param  callable(array<string, mixed>):MessageSenderInterface  $factory  Factory receiving the effective configuration
      *
      * @throws TextoException If $name is not a recognized driver or already registered
      */

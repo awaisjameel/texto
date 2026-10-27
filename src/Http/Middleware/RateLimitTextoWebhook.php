@@ -21,7 +21,7 @@ class RateLimitTextoWebhook
         // DoS safety cap that pairs with the signature verification guarding these routes.
         $key = 'texto-webhook:'.sha1($request->path());
         if (RateLimiter::tooManyAttempts($key, $limit)) {
-            return response('Too Many Requests', 429);
+            return response('Too Many Requests', 429, ['Retry-After' => (string) RateLimiter::availableIn($key)]);
         }
 
         $response = $next($request);

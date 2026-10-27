@@ -7,6 +7,7 @@ namespace Awaisjameel\Texto\Repositories;
 use Awaisjameel\Texto\Contracts\MessageRepositoryInterface;
 use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Models\Message;
+use Awaisjameel\Texto\Support\Configuration;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
 use Illuminate\Support\Facades\Cache;
@@ -14,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 
 class EloquentMessageRepository implements MessageRepositoryInterface
 {
-    public function storeSent(SentMessageResult $result): Message
+    public function storeSent(SentMessageResult $result, ?array $configuration = null): Message
     {
         // Extract optional analytical fields from metadata (currently Telnyx-specific)
         $segments = $result->metadata['telnyx_parts'] ?? null;
@@ -41,6 +42,7 @@ class EloquentMessageRepository implements MessageRepositoryInterface
             'provider_message_id' => $result->providerMessageId,
             'error_code' => $result->errorCode,
             'metadata' => $baseMeta,
+            'driver_config' => $configuration ?? Configuration::forDriver($result->driver),
             'segments_count' => $segments,
             'cost_estimate' => $cost,
             'sent_at' => now(),
@@ -70,10 +72,14 @@ class EloquentMessageRepository implements MessageRepositoryInterface
         // A short atomic-cache lock also prevents the first concurrent deliveries from racing
         // each other. Production deployments should use their normal shared cache (for example,
         // Redis) when they run multiple application nodes.
+        if ($result->providerMessageId === null || $result->providerMessageId === '') {
+            return Message::create($attributes);
+        }
         $key = 'texto:inbound:'.hash('sha256', $result->driver->value."\0".$result->providerMessageId);
         $record = Cache::lock($key, 10)->block(2, function () use ($result, $attributes): Message {
             return Message::firstOrCreate([
                 'driver' => $result->driver->value,
+                'direction' => $result->direction->value,
                 'provider_message_id' => $result->providerMessageId,
             ], $attributes);
         });
@@ -91,42 +97,46 @@ class EloquentMessageRepository implements MessageRepositoryInterface
         if (! $result->providerMessageId) {
             return null;
         }
-        $message = Message::where('driver', $result->driver->value)
-            ->where('provider_message_id', $result->providerMessageId)
-            ->first();
-        if (! $message) {
-            return null;
-        }
 
-        $previousStatus = $message->status;
-
-        // Always merge metadata; status webhooks may carry useful event/error/recipient detail
-        // even when the status itself does not advance (e.g. out-of-order or duplicate callbacks).
-        $message->metadata = array_merge($message->metadata ?? [], $result->metadata);
-
-        // Forward-only progression: never regress a terminal/more-advanced state. Providers deliver
-        // delivery receipts out of order, so a late 'sent' must not overwrite 'delivered'.
-        $progressed = false;
-        if ($result->status !== null) {
-            // The status column is nullable, so a row may carry no (or an unrecognized) status yet.
-            $current = $message->status !== null ? MessageStatus::tryFrom($message->status) : null;
-            if ($current === null || $current->progressesTo($result->status)) {
-                $message->status = $result->status->value;
-                $message->status_updated_at = now();
-                $progressed = true;
+        return (new Message)->getConnection()->transaction(function () use ($result): ?Message {
+            $message = Message::where('driver', $result->driver->value)
+                ->where('direction', $result->direction->value)
+                ->where('provider_message_id', $result->providerMessageId)
+                ->lockForUpdate()->first();
+            if (! $message) {
+                return null;
             }
-        }
 
-        $message->save();
-        Log::debug('Texto webhook status processed', [
-            'id' => $message->id,
-            'status' => $message->status,
-            'previous' => $previousStatus,
-            'progressed' => $progressed,
-        ]);
+            $previousStatus = $message->status;
 
-        // Only signal an update (→ MessageStatusUpdated event) when the status actually advanced.
-        return $progressed ? $message : null;
+            // Always merge metadata; status webhooks may carry useful event/error/recipient detail
+            // even when the status itself does not advance (e.g. out-of-order or duplicate callbacks).
+            $message->metadata = array_merge($message->metadata ?? [], $result->metadata);
+
+            // Forward-only progression: never regress a terminal/more-advanced state. Providers deliver
+            // delivery receipts out of order, so a late 'sent' must not overwrite 'delivered'.
+            $progressed = false;
+            if ($result->status !== null) {
+                // The status column is nullable, so a row may carry no (or an unrecognized) status yet.
+                $current = $message->status !== null ? MessageStatus::tryFrom($message->status) : null;
+                if ($current === null || $current->progressesTo($result->status)) {
+                    $message->status = $result->status->value;
+                    $message->status_updated_at = now();
+                    $progressed = true;
+                }
+            }
+
+            $message->save();
+            Log::debug('Texto webhook status processed', [
+                'id' => $message->id,
+                'status' => $message->status,
+                'previous' => $previousStatus,
+                'progressed' => $progressed,
+            ]);
+
+            // Only signal an update (→ MessageStatusUpdated event) when the status actually advanced.
+            return $progressed ? $message : null;
+        });
     }
 
     /**
@@ -134,77 +144,82 @@ class EloquentMessageRepository implements MessageRepositoryInterface
      */
     public function updatePolledStatus(Message $message, MessageStatus $status, array $extraMetadata = []): Message
     {
-        $previousStatus = $message->status;
-        $message->status = $status->value;
-        $meta = $message->metadata ?? [];
-        if (! isset($meta['poll_attempts'])) {
-            $meta['poll_attempts'] = 0;
-        }
-        $meta['poll_attempts']++;
-        $meta['last_poll_at'] = now()->toIso8601String();
-        foreach ($extraMetadata as $k => $v) {
-            $meta[$k] = $v;
-        }
-        $message->metadata = $meta;
-        $message->status_updated_at = now();
-        $message->save();
-        Log::debug('Texto polled status update', [
-            'id' => $message->id,
-            'status' => $message->status,
-            'previous' => $previousStatus,
-            'poll_attempts' => $meta['poll_attempts'],
-        ]);
+        return $message->getConnection()->transaction(function () use ($message, $status, $extraMetadata): Message {
+            $current = $message->newQuery()->whereKey($message->getKey())->lockForUpdate()->firstOrFail();
+            $previous = $current->status !== null ? MessageStatus::tryFrom($current->status) : null;
+            $missingProviderId = $current->provider_message_id === null || $current->provider_message_id === '';
+            $markAmbiguous = $status === MessageStatus::Ambiguous && $missingProviderId
+                && in_array($previous, [MessageStatus::Queued, MessageStatus::Sending, MessageStatus::Sent], true);
+            if ($previous === null || $previous->progressesTo($status) || $markAmbiguous) {
+                $current->status = $status->value;
+                $current->status_updated_at = now();
+            }
+            $meta = $current->metadata ?? [];
+            $attempts = $meta['poll_attempts'] ?? 0;
+            $meta['poll_attempts'] = (is_int($attempts) && $attempts >= 0 ? $attempts : 0) + 1;
+            $meta['last_poll_at'] = now()->toIso8601String();
+            $current->metadata = array_merge($meta, $extraMetadata);
+            $current->save();
 
-        return $message;
+            return $current;
+        });
     }
 
     /**
      * Upgrade a specific queued message by its primary key. This removes ambiguity when multiple queued rows share identical body/to/driver.
      */
-    public function upgradeQueued(int $id, SentMessageResult $result): ?Message
+    public function upgradeQueued(int $id, SentMessageResult $result, ?array $configuration = null): ?Message
     {
-        $message = Message::find($id);
-        if (! $message) {
-            return null;
-        }
-        if (! in_array($message->status, [MessageStatus::Queued->value, MessageStatus::Ambiguous->value], true)) {
-            // Only upgrade queued/ambiguous rows. If already upgraded, skip silently.
-            Log::debug('Texto upgradeQueuedById skipped non-queued row', ['id' => $id, 'status' => $message->status]);
+        return (new Message)->getConnection()->transaction(function () use ($id, $result, $configuration): ?Message {
+            $message = Message::whereKey($id)->lockForUpdate()->first();
+            if (! $message) {
+                return null;
+            }
+            if (! in_array($message->status, [MessageStatus::Queued->value, MessageStatus::Ambiguous->value], true)) {
+                // Only upgrade queued/ambiguous rows. If already upgraded, skip silently.
+                Log::debug('Texto upgradeQueuedById skipped non-queued row', ['id' => $id, 'status' => $message->status]);
 
-            return null;
-        }
+                return null;
+            }
 
-        $previousStatus = $message->status;
-        $message->status = $result->status->value;
-        $message->provider_message_id = $result->providerMessageId;
-        $message->error_code = $result->errorCode;
-        $merged = array_merge($message->metadata ?? [], $result->metadata);
-        if (! array_key_exists('poll_attempts', $merged)) {
-            $merged['poll_attempts'] = 0;
-        }
-        if (! array_key_exists('last_poll_at', $merged)) {
-            $merged['last_poll_at'] = null;
-        }
-        $message->metadata = $merged;
-        if (isset($result->metadata['telnyx_parts'])) {
-            $message->segments_count = $result->metadata['telnyx_parts'];
-        }
-        if (isset($result->metadata['telnyx_cost_amount'])) {
-            $message->cost_estimate = $result->metadata['telnyx_cost_amount'];
-        }
-        if (! $message->sent_at) {
-            $message->sent_at = now();
-        }
-        $message->status_updated_at = now();
-        $message->save();
-        Log::debug('Texto upgraded queued message (by id)', [
-            'id' => $message->id,
-            'provider_id' => $message->provider_message_id,
-            'status' => $message->status,
-            'previous' => $previousStatus,
-            'deterministic' => true,
-        ]);
+            if ($message->driver !== $result->driver->value || $message->direction !== $result->direction->value) {
+                return null;
+            }
+            $previousStatus = $message->status;
+            $message->status = $result->status->value;
+            $message->provider_message_id = $result->providerMessageId;
+            $message->error_code = $result->errorCode;
+            if ($configuration !== null) {
+                $message->driver_config = $configuration;
+            }
+            $merged = array_merge($message->metadata ?? [], $result->metadata);
+            if (! array_key_exists('poll_attempts', $merged)) {
+                $merged['poll_attempts'] = 0;
+            }
+            if (! array_key_exists('last_poll_at', $merged)) {
+                $merged['last_poll_at'] = null;
+            }
+            $message->metadata = $merged;
+            if (isset($result->metadata['telnyx_parts'])) {
+                $message->segments_count = $result->metadata['telnyx_parts'];
+            }
+            if (isset($result->metadata['telnyx_cost_amount'])) {
+                $message->cost_estimate = $result->metadata['telnyx_cost_amount'];
+            }
+            if (! $message->sent_at) {
+                $message->sent_at = now();
+            }
+            $message->status_updated_at = now();
+            $message->save();
+            Log::debug('Texto upgraded queued message (by id)', [
+                'id' => $message->id,
+                'provider_id' => $message->provider_message_id,
+                'status' => $message->status,
+                'previous' => $previousStatus,
+                'deterministic' => true,
+            ]);
 
-        return $message;
+            return $message;
+        });
     }
 }

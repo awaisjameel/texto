@@ -12,25 +12,31 @@ use Awaisjameel\Texto\Drivers\TwilioSender;
 use Awaisjameel\Texto\Drivers\WhatsappSender;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Exceptions\TextoException;
+use Awaisjameel\Texto\Support\Configuration;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 
 class DriverManager implements DriverManagerInterface
 {
-    /** @var array<string, callable():MessageSenderInterface> */
+    /** @var array<string, callable(array<string, mixed>):MessageSenderInterface> */
     protected array $extensions = [];
 
     public function __construct(protected ConfigRepository $config) {}
 
-    public function sender(?Driver $driver = null): MessageSenderInterface
+    public function sender(?Driver $driver = null, ?array $configuration = null): MessageSenderInterface
     {
-        $driver = $driver ?? Driver::from((string) $this->config->get('texto.driver', 'twilio'));
+        if ($driver === null) {
+            $configured = $this->config->get('texto.driver', 'twilio');
+            if (! is_string($configured)) {
+                throw new TextoException('The default message driver must be a string.');
+            }
+            $driver = Driver::from($configured);
+        }
         $name = $driver->value;
+        $driverConfig = $configuration ?? Configuration::forDriver($driver);
 
         if (isset($this->extensions[$name])) {
-            return ($this->extensions[$name])();
+            return ($this->extensions[$name])($driverConfig);
         }
-
-        $driverConfig = $this->config->get("texto.{$name}", []);
 
         return match ($driver) {
             Driver::Twilio => new TwilioSender($driverConfig),

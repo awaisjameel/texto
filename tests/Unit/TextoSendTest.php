@@ -93,8 +93,9 @@ it('applies driver config overrides during send lifecycle', function () {
 
     /** @var DriverManagerInterface $manager */
     $manager = app(DriverManagerInterface::class);
-    $manager->extend('telnyx', function () {
-        expect(config('texto.telnyx.api_key'))->toBe('override-key');
+    $manager->extend('telnyx', function (array $configuration) {
+        expect($configuration['api_key'])->toBe('override-key');
+        expect(config('texto.telnyx.api_key'))->toBe('original-key');
 
         return new FakeSender;
     });

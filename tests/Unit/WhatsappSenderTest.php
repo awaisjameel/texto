@@ -89,7 +89,7 @@ it('resolves the WhatsApp driver through Texto and persists its canonical result
         'phone_number_id' => 'phone-id',
         'from_number' => '+15550003333',
     ]);
-    Http::fake(['https://graph.facebook.com/v25.0/phone-id/messages' => Http::response([
+    Http::fake(['https://graph.facebook.com/v26.0/phone-id/messages' => Http::response([
         'contacts' => [['wa_id' => '15551234567']],
         'messages' => [['id' => 'wamid.123', 'message_status' => 'accepted']],
     ])]);
@@ -111,7 +111,7 @@ it('does not reuse the global API client for per-send WhatsApp tenant overrides'
         'access_token' => 'global-token',
         'phone_number_id' => 'global-phone-id',
     ]);
-    Http::fake(['https://graph.facebook.com/v25.0/tenant-phone-id/messages' => Http::response([
+    Http::fake(['https://graph.facebook.com/v26.0/tenant-phone-id/messages' => Http::response([
         'contacts' => [['wa_id' => '15551234567']],
         'messages' => [['id' => 'wamid.tenant', 'message_status' => 'accepted']],
     ])]);
@@ -126,7 +126,7 @@ it('does not reuse the global API client for per-send WhatsApp tenant overrides'
 
     expect($result->providerMessageId)->toBe('wamid.tenant');
     expect($globalApi->payloads)->toBe([]);
-    Http::assertSent(fn ($request) => $request->url() === 'https://graph.facebook.com/v25.0/tenant-phone-id/messages'
+    Http::assertSent(fn ($request) => $request->url() === 'https://graph.facebook.com/v26.0/tenant-phone-id/messages'
         && $request->hasHeader('Authorization', 'Bearer tenant-token'));
 });
 

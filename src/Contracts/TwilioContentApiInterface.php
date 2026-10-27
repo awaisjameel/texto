@@ -9,12 +9,24 @@ namespace Awaisjameel\Texto\Contracts;
  */
 interface TwilioContentApiInterface
 {
-    /** Find template by friendly name; returns raw record or null */
+    /**
+     * Find template by friendly name; returns raw record or null
+     *
+     * @return array<string, mixed>|null
+     */
     public function findTemplateByFriendlyName(string $friendlyName): ?array;
 
-    /** Create template from definition; returns SID */
+    /**
+     * Create template from definition; returns SID
+     *
+     * @param  array<string, mixed>  $definition
+     */
     public function createTemplate(array $definition): string;
 
-    /** Ensure template exists; create using factory if not; returns SID */
+    /**
+     * Ensure template exists; create using factory if not; returns SID
+     *
+     * @param  callable():array<string, mixed>  $definitionFactory
+     */
     public function ensureTemplate(string $friendlyName, callable $definitionFactory): string;
 }

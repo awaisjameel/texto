@@ -14,6 +14,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 $processWebhook = function (WebhookProcessingResult $result, MessageRepositoryInterface $repo): void {
+    if (! config('texto.store_messages', true)) {
+        event($result->direction === Direction::Received ? new MessageReceived($result) : new MessageStatusUpdated($result));
+
+        return;
+    }
     if ($result->direction === Direction::Received) {
         $message = $repo->storeInbound($result);
         if ($message->wasRecentlyCreated) {
@@ -60,13 +65,16 @@ Route::middleware([RateLimitTextoWebhook::class])
 // Meta validates subscriptions with this GET handshake. It cannot send Texto's shared secret.
 Route::middleware([RateLimitTextoWebhook::class])
     ->get('/texto/webhook/whatsapp', function (Request $request) {
-        $verifyToken = (string) config('texto.whatsapp.verify_token');
+        $verifyToken = config('texto.whatsapp.verify_token');
+        $provided = $request->query('hub_verify_token');
+        $challenge = $request->query('hub_challenge');
         if (
-            $verifyToken !== ''
+            is_string($verifyToken) && $verifyToken !== ''
             && $request->query('hub_mode') === 'subscribe'
-            && hash_equals($verifyToken, (string) $request->query('hub_verify_token'))
+            && is_string($provided) && hash_equals($verifyToken, $provided)
+            && is_string($challenge)
         ) {
-            return response((string) $request->query('hub_challenge'), 200)
+            return response($challenge, 200)
                 ->header('Content-Type', 'text/plain');
         }
 

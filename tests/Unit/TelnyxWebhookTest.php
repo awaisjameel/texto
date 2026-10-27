@@ -109,12 +109,12 @@ function signedTelnyxRequest(string $rawPayload, int $timestamp): array
 {
     $keypair = sodium_crypto_sign_keypair();
     config()->set('texto.telnyx.webhook_secret', base64_encode(sodium_crypto_sign_publickey($keypair)));
-    $signature = base64_encode(sodium_crypto_sign_detached($timestamp.'.'.$rawPayload, sodium_crypto_sign_secretkey($keypair)));
+    $signature = base64_encode(sodium_crypto_sign_detached($timestamp.'|'.$rawPayload, sodium_crypto_sign_secretkey($keypair)));
 
     return [
         'CONTENT_TYPE' => 'application/json',
         'HTTP_TELNYX_SIGNATURE_ED25519' => $signature,
-        'HTTP_TELNYX_SIGNATURE_TIMESTAMP' => (string) $timestamp,
+        'HTTP_TELNYX_TIMESTAMP' => (string) $timestamp,
     ];
 }
 

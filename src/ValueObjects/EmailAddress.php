@@ -28,7 +28,10 @@ final class EmailAddress implements AddressInterface
         // canonical value stays a bare mailbox address.
         $displayName = null;
         if (preg_match('/^(.*)<([^<>]+)>$/s', $raw, $matches) === 1) {
-            $displayName = trim($matches[1], " \t\r\n\"'");
+            $displayName = trim($matches[1]);
+            if (str_starts_with($displayName, '"') && str_ends_with($displayName, '"')) {
+                $displayName = preg_replace('/\\\\(.)/s', '$1', substr($displayName, 1, -1));
+            }
             $displayName = $displayName === '' ? null : $displayName;
             $raw = trim($matches[2]);
         }
@@ -51,6 +54,16 @@ final class EmailAddress implements AddressInterface
     public function value(): string
     {
         return $this->address;
+    }
+
+    /** A round-trippable name-addr string for encrypted queue serialization. */
+    public function formatted(): string
+    {
+        if ($this->displayName === null || $this->displayName === '') {
+            return $this->address;
+        }
+
+        return '"'.strtr($this->displayName, ['\\' => '\\\\', '"' => '\\"']).'" <'.$this->address.'>';
     }
 
     public function __toString(): string

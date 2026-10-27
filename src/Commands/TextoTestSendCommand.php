@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Awaisjameel\Texto\Commands;
 
+use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Texto;
 use Illuminate\Console\Command;
 
@@ -21,8 +22,20 @@ class TextoTestSendCommand extends Command
         if ($this->option('driver')) {
             $options['driver'] = $this->option('driver');
         }
-        $result = $texto->send($this->argument('to'), $this->argument('body'), $options);
-        $this->info('Message sent via '.$result->driver->value.' id='.$result->providerMessageId);
+        try {
+            $result = $texto->send($this->argument('to'), $this->argument('body'), $options);
+        } catch (\Throwable $exception) {
+            report($exception);
+            $this->error('Message could not be sent. Check the application log.');
+
+            return self::FAILURE;
+        }
+        if ($result->status === MessageStatus::Failed) {
+            $this->error('Message send failed via '.$result->driver->value);
+
+            return self::FAILURE;
+        }
+        $this->info('Message '.$result->status->value.' via '.$result->driver->value.' id='.$result->providerMessageId);
 
         return self::SUCCESS;
     }

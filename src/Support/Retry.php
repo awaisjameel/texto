@@ -18,6 +18,10 @@ final class Retry
      */
     public static function exponential(Closure $callback, int $maxAttempts, int $backoffStartMs, ?Closure $shouldRetry = null): mixed
     {
+        $maximumDelay = intdiv(PHP_INT_MAX, 1000);
+        if ($maxAttempts < 1 || $backoffStartMs < 0 || $backoffStartMs > $maximumDelay) {
+            throw new \InvalidArgumentException('Retry attempts must be positive and the millisecond backoff must fit the native timer.');
+        }
         $attempt = 0;
         $delay = $backoffStartMs;
         while (true) {
@@ -29,7 +33,7 @@ final class Retry
                     throw $e;
                 }
                 usleep($delay * 1000);
-                $delay *= 2;
+                $delay = min($maximumDelay, $delay * 2);
             }
         }
     }

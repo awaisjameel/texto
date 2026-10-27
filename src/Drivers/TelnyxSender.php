@@ -27,13 +27,16 @@ class TelnyxSender implements MessageSenderInterface, PollableMessageSenderInter
 
     protected TelnyxMessagingApiInterface $messagingApi;
 
+    /**
+     * @param  array<string, mixed>  $config
+     */
     public function __construct(protected array $config, ?TelnyxMessagingApiInterface $messagingApi = null)
     {
         $apiKey = $this->config['api_key'] ?? null;
         if (! $apiKey) {
             throw new TextoSendFailedException('Telnyx API key missing.');
         }
-        $this->messagingApi = $messagingApi ?? new TelnyxMessagingApi($apiKey);
+        $this->messagingApi = $messagingApi ?? new TelnyxMessagingApi($apiKey, $config);
     }
 
     /**

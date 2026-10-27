@@ -19,11 +19,9 @@ class VerifyTextoWebhookSecret
     public function handle(Request $request, Closure $next): Response
     {
         $secret = config('texto.webhook.secret');
-        if ($secret) {
-            $provided = $request->header('X-Texto-Secret');
-            if (! $provided || ! hash_equals($secret, $provided)) {
-                return response('Invalid webhook secret', 403);
-            }
+        $provided = $request->header('X-Texto-Secret');
+        if (! is_string($secret) || $secret === '' || ! is_string($provided) || ! hash_equals($secret, $provided)) {
+            return response('Invalid webhook secret', 403);
         }
 
         return $next($request);

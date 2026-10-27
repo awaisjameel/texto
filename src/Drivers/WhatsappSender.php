@@ -27,6 +27,9 @@ class WhatsappSender implements MessageSenderInterface
 
     protected WhatsappApiInterface $api;
 
+    /**
+     * @param  array<string, mixed>  $config
+     */
     public function __construct(protected array $config, ?WhatsappApiInterface $api = null)
     {
         $token = $this->config['access_token'] ?? null;
@@ -38,7 +41,7 @@ class WhatsappSender implements MessageSenderInterface
         // Do not resolve the globally-bound API adapter here: callers can override credentials
         // per send, and a singleton would silently send with another tenant's credentials.
         // Tests and custom integrations can still inject an adapter explicitly.
-        $this->api = $api ?? new WhatsappApi((string) $token, (string) $phoneNumberId);
+        $this->api = $api ?? new WhatsappApi((string) $token, (string) $phoneNumberId, $config);
     }
 
     /** @param array<int, mixed> $mediaUrls */

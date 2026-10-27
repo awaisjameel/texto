@@ -11,7 +11,10 @@ use Awaisjameel\Texto\Enums\MessageStatus;
 
 final class WebhookProcessingResult
 {
-    /** @param string[] $mediaUrls */
+    /**
+     * @param  string[]  $mediaUrls
+     * @param  array<string, mixed>  $metadata
+     */
     private function __construct(
         public readonly Driver $driver,
         public readonly Direction $direction,
@@ -24,12 +27,18 @@ final class WebhookProcessingResult
         public readonly ?MessageStatus $status,
     ) {}
 
-    /** @param string[] $media */
+    /**
+     * @param  string[]  $media
+     * @param  array<string, mixed>  $metadata
+     */
     public static function inbound(Driver $driver, AddressInterface $from, AddressInterface $to, ?string $body, array $media, array $metadata, ?string $providerMessageId = null): self
     {
         return new self($driver, Direction::Received, $from, $to, $body, $media, $metadata, $providerMessageId, MessageStatus::Received);
     }
 
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
     public static function status(Driver $driver, ?string $providerMessageId, MessageStatus $status, array $metadata = []): self
     {
         return new self($driver, Direction::Sent, null, null, null, [], $metadata, $providerMessageId, $status);

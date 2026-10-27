@@ -15,6 +15,7 @@ function conversationSenderConfig(): array
         'use_conversations' => true,
         'sms_template_sid' => 'HX111',
         'mms_template_sid' => 'HX222',
+        'mms_media_base_url' => 'https://example.com',
     ];
 }
 
@@ -24,7 +25,7 @@ function fakeConversationEndpoints(): void
         'conversations.twilio.com/v1/Conversations' => Http::response(['sid' => 'CH123'], 201),
         'conversations.twilio.com/v1/Conversations/CH123/Participants' => Http::response(['sid' => 'MB123'], 201),
         'conversations.twilio.com/v1/Conversations/CH123/Messages' => Http::response(['sid' => 'IM999', 'status' => 'sent'], 201),
-        'conversations.twilio.com/v1/Conversations/CH123/Webhooks' => Http::response(['sid' => 'WH123'], 201),
+        'conversations.twilio.com/v1/Conversations/CH123/Webhooks' => fn ($request) => $request->method() === 'GET' ? Http::response(['webhooks' => []]) : Http::response(['sid' => 'WH123'], 201),
     ]);
 }
 
@@ -40,7 +41,7 @@ it('sends conversation message with proper form keys', function () {
         'conversations.twilio.com/v1/Conversations' => Http::response(['sid' => 'CH123'], 201),
         'conversations.twilio.com/v1/Conversations/CH123/Participants' => Http::response(['sid' => 'MB123'], 201),
         'conversations.twilio.com/v1/Conversations/CH123/Messages' => Http::response(['sid' => 'IM999', 'status' => 'sent'], 201),
-        'conversations.twilio.com/v1/Conversations/CH123/Webhooks' => Http::response(['sid' => 'WH123'], 201),
+        'conversations.twilio.com/v1/Conversations/CH123/Webhooks' => fn ($request) => $request->method() === 'GET' ? Http::response(['webhooks' => []]) : Http::response(['sid' => 'WH123'], 201),
     ]);
 
     $sender = new TwilioSender($config);
@@ -52,11 +53,12 @@ it('sends conversation message with proper form keys', function () {
     Http::assertSent(function ($request) {
         if (str_contains($request->url(), '/Messages')) {
             $body = $request->body();
+            parse_str($body, $fields);
 
-            return str_contains($body, 'Author=%2B15550001111') && str_contains($body, 'Body=Hello%20convo');
+            return ($fields['Author'] ?? null) === '+15550001111' && ($fields['Body'] ?? null) === 'Hello convo';
         }
 
-        return true;
+        return false;
     });
 });
 
@@ -75,7 +77,7 @@ it('falls back to a plain body send when the body exceeds template capacity', fu
                 && ! str_contains($request->body(), 'ContentSid');
         }
 
-        return true;
+        return false;
     });
 });
 
@@ -104,7 +106,7 @@ it('splits template variables on character boundaries for multibyte bodies', fun
 
     Http::assertSent(function ($request) {
         if (! str_contains($request->url(), '/Messages')) {
-            return true;
+            return false;
         }
         parse_str($request->body(), $params);
         $vars = json_decode($params['ContentVariables'] ?? '', true);
@@ -124,7 +126,7 @@ it('sends repeated Configuration.Filters fields when attaching the conversation 
 
     Http::assertSent(function ($request) {
         if ($request->method() !== 'POST' || ! str_ends_with($request->url(), '/Webhooks')) {
-            return true;
+            return false;
         }
         $body = $request->body();
 

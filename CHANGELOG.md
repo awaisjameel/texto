@@ -2,7 +2,22 @@
 
 All notable changes to `texto` will be documented in this file.
 
-## Unreleased
+## 4.0.0 - 2026-10-27
+
+- Enforce Pint, PHPStan, strict manifest validation and dependency audits on pull requests and pushes; consolidate duplicate/automatic-formatting workflows.
+
+### Modernization and fixes
+
+- Support maintained PHP 8.2-8.5 and Laravel 12/13; update dependencies, remove unused tooling, and enforce PHPStan level 8 without a baseline.
+- Encrypt effective per-message credential snapshots and queue payloads. Add the nullable `driver_config` migration and hidden encrypted model cast; polling keeps the original account configuration.
+- Isolate all provider adapters and endpoint settings per sender. Extend driver-manager/repository contracts with optional effective-configuration arguments.
+- Execute queued sends once per ledger row, upgrade failures in place, preserve named email addresses, and mark unknown failed-job outcomes ambiguous. Add execution locks and bounded retry validation.
+- Correct Telnyx Ed25519 headers and `timestamp|body` signing; preserve Twilio raw form/query/JSON signatures and validate malformed webhook boundaries.
+- Preserve Conversations attachments or fail clearly; remove uncertain retries and undocumented template payload fallback. Paginate lists safely and manage only the exact matching webhook URL.
+- Implement documented aggregate/detailed delivery receipts: any recipient success suffices, all must fail before a failure is reported. Support signed `onDeliveryUpdated` callbacks with the same policy.
+- Prevent stale status writes and polling starvation. Support no-storage webhooks without database access; preserve inbound media metadata.
+- Make installer/test-send failures observable, retain existing published files by default, ship provider guides, and update WhatsApp's default to Graph API v26.0.
+- Expand queue, signature, protocol, media, scheduling, command and delivery regression coverage. See MIGRATION.md for required deployment and custom-interface updates.
 
 ### Added
 
@@ -20,7 +35,7 @@ All notable changes to `texto` will be documented in this file.
 - Twilio webhook signature validation now signs only POST body parameters (plus the full URL including query string), so webhook URLs with query strings validate correctly. Configure `TrustProxies` behind TLS-terminating proxies.
 - Twilio Conversations `onMessageAdded` events authored by the configured `from_number` (echoes of Texto's own outbound messages) are recognized and intentionally ignored instead of being recorded as inbound; `WebhookHandlerInterface::handle()` may now return `null` for such events.
 - Conversation-scoped webhook attachment sends `Configuration.Filters`/`Configuration.Triggers` as repeated form fields, which Twilio requires (comma-joined values were silently ignored).
-- Conversations created for a send that ultimately fails are deleted again (best effort), so failed sends no longer leak orphaned conversations.
+- Conversations created for a definitively rejected send are deleted again (best effort); unknown outcomes are preserved to avoid deleting an accepted message or resending it.
 
 ### Breaking
 

@@ -11,6 +11,7 @@ use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Enums\MessageStatus;
 use Awaisjameel\Texto\Exceptions\TextoSendFailedException;
 use Awaisjameel\Texto\Mail\TextoMail;
+use Awaisjameel\Texto\Support\AddressResolver;
 use Awaisjameel\Texto\ValueObjects\EmailAddress;
 use Awaisjameel\Texto\ValueObjects\SentMessageResult;
 use Illuminate\Mail\Mailables\Address;
@@ -65,6 +66,9 @@ class EmailSender implements MessageSenderInterface
             $sent = Mail::mailer($this->mailerName())
                 ->to(new Address($to->address, $to->displayName))
                 ->send($mailable);
+            if ($sent === null && ! Mail::isFake()) {
+                throw new TextoSendFailedException('The application mailer cancelled the message before transport.');
+            }
         } catch (\Throwable $e) {
             Log::error('Texto email send failed', [
                 'to' => $to->address,
@@ -116,31 +120,13 @@ class EmailSender implements MessageSenderInterface
      */
     protected function defaultFrom(): ?EmailAddress
     {
-        $configured = $this->config['from_address'] ?? null;
-        if (is_string($configured) && $configured !== '') {
-            $name = $this->config['from_name'] ?? null;
-
-            try {
-                $parsed = EmailAddress::fromString($configured);
-
-                return new EmailAddress($parsed->address, is_string($name) && $name !== '' ? $name : $parsed->displayName);
-            } catch (\Throwable $e) {
-                throw new TextoSendFailedException('Email driver from_address is invalid: '.$e->getMessage(), 0, $e);
-            }
+        try {
+            $address = AddressResolver::defaultFrom(Driver::Email, $this->config);
+        } catch (\Throwable $exception) {
+            throw new TextoSendFailedException('Email driver sender configuration is invalid.', 0, $exception);
         }
 
-        $appFrom = config('mail.from.address');
-        if (is_string($appFrom) && $appFrom !== '') {
-            $appName = config('mail.from.name');
-
-            try {
-                return new EmailAddress(EmailAddress::fromString($appFrom)->address, is_string($appName) && $appName !== '' ? $appName : null);
-            } catch (\Throwable) {
-                return null; // let the mailer surface its own configuration error
-            }
-        }
-
-        return null;
+        return $address instanceof EmailAddress ? $address : null;
     }
 
     protected function assertEmailAddress(AddressInterface $address, string $field): EmailAddress

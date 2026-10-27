@@ -18,7 +18,10 @@ use Illuminate\Http\JsonResponse;
  */
 final class SentMessageResult implements \JsonSerializable, \Stringable, Responsable
 {
-    /** @param string[] $mediaUrls */
+    /**
+     * @param  string[]  $mediaUrls
+     * @param  array<string, mixed>  $metadata
+     */
     public function __construct(
         public readonly Driver $driver,
         public readonly Direction $direction,
@@ -36,7 +39,11 @@ final class SentMessageResult implements \JsonSerializable, \Stringable, Respons
         public readonly ?string $errorCode = null,
     ) {}
 
-    /** Structured array representation for logging / serialization. */
+    /**
+     * Structured array representation for logging / serialization.
+     *
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return [
@@ -53,6 +60,9 @@ final class SentMessageResult implements \JsonSerializable, \Stringable, Respons
         ];
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function jsonSerialize(): array
     {
         return $this->toArray();

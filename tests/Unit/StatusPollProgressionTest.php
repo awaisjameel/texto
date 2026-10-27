@@ -24,7 +24,7 @@ it('promotes queued to sent on polling when provider returns sent', function () 
     $this->app->bind(DriverManagerInterface::class, function () {
         return new class implements DriverManagerInterface
         {
-            public function sender(?Driver $driver = null): MessageSenderInterface
+            public function sender(?Driver $driver = null, ?array $configuration = null): MessageSenderInterface
             {
                 return new class implements MessageSenderInterface, PollableMessageSenderInterface
                 {

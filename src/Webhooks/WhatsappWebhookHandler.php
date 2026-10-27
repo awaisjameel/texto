@@ -8,6 +8,7 @@ use Awaisjameel\Texto\Contracts\WebhookHandlerInterface;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Exceptions\TextoWebhookValidationException;
 use Awaisjameel\Texto\Support\StatusMapper;
+use Awaisjameel\Texto\Support\WebhookData;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
 use Awaisjameel\Texto\Webhooks\Concerns\ValidatesMetaSignature;
@@ -44,9 +45,9 @@ class WhatsappWebhookHandler implements WebhookHandlerInterface
             $this->assertValidMetaSignature($request, $this->config);
         }
 
-        $payload = $request->json()->all();
+        $payload = WebhookData::body($request);
         $entries = $payload['entry'] ?? null;
-        if (! is_array($entries)) {
+        if (! is_array($entries) || ! array_is_list($entries)) {
             throw new TextoWebhookValidationException('WhatsApp webhook payload missing entries.');
         }
 
@@ -67,13 +68,13 @@ class WhatsappWebhookHandler implements WebhookHandlerInterface
                     throw new TextoWebhookValidationException('WhatsApp messages change missing value.');
                 }
                 $displayNumber = $this->arrayValue($value, 'metadata')['display_phone_number'] ?? null;
-                foreach ($value['messages'] ?? [] as $message) {
+                foreach (WebhookData::items($value['messages'] ?? [], 'messages') as $message) {
                     if (! is_array($message)) {
                         throw new TextoWebhookValidationException('WhatsApp inbound message is malformed.');
                     }
                     $results[] = $this->mapInbound($message, $value, $displayNumber);
                 }
-                foreach ($value['statuses'] ?? [] as $status) {
+                foreach (WebhookData::items($value['statuses'] ?? [], 'statuses') as $status) {
                     if (! is_array($status)) {
                         throw new TextoWebhookValidationException('WhatsApp message status is malformed.');
                     }

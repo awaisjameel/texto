@@ -8,6 +8,7 @@ use Awaisjameel\Texto\Contracts\WebhookHandlerInterface;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Exceptions\TextoWebhookValidationException;
 use Awaisjameel\Texto\Support\StatusMapper;
+use Awaisjameel\Texto\Support\WebhookData;
 use Awaisjameel\Texto\ValueObjects\EmailAddress;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
 use Illuminate\Http\Request;
@@ -36,7 +37,7 @@ class EmailWebhookHandler implements WebhookHandlerInterface
     {
         $this->assertValidSecret($request);
 
-        $payload = $request->json()->all();
+        $payload = WebhookData::body($request);
 
         return match ($payload['event'] ?? null) {
             'inbound' => $this->mapInbound($payload),

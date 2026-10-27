@@ -16,13 +16,14 @@ use Illuminate\Support\Carbon;
  * @property string|null $from_number
  * @property string|null $to_number
  * @property string|null $body
- * @property array|null $media_urls
+ * @property list<string>|null $media_urls
  * @property string|null $status
  * @property string|null $provider_message_id
  * @property string|null $error_code
  * @property int|null $segments_count
- * @property float|null $cost_estimate
- * @property array|null $metadata
+ * @property string|null $cost_estimate
+ * @property array<string, mixed>|null $metadata
+ * @property array<string, mixed>|null $driver_config Decrypted only in application memory.
  * @property Carbon|null $sent_at
  * @property Carbon|null $received_at
  * @property Carbon|null $status_updated_at
@@ -52,16 +53,23 @@ class Message extends Model
         'segments_count',
         'cost_estimate',
         'metadata',
+        'driver_config',
         'sent_at',
         'received_at',
         'status_updated_at',
     ];
 
     protected $casts = [
+        'driver_config' => 'encrypted:array',
+        'cost_estimate' => 'decimal:4',
+        'segments_count' => 'integer',
         'media_urls' => 'array',
         'metadata' => 'array',
         'sent_at' => 'datetime',
         'received_at' => 'datetime',
         'status_updated_at' => 'datetime',
     ];
+
+    /** @var list<string> */
+    protected $hidden = ['driver_config'];
 }

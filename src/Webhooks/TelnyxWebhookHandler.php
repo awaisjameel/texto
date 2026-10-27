@@ -8,6 +8,7 @@ use Awaisjameel\Texto\Contracts\WebhookHandlerInterface;
 use Awaisjameel\Texto\Enums\Driver;
 use Awaisjameel\Texto\Exceptions\TextoWebhookValidationException;
 use Awaisjameel\Texto\Support\StatusMapper;
+use Awaisjameel\Texto\Support\WebhookData;
 use Awaisjameel\Texto\ValueObjects\PhoneNumber;
 use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
 use Awaisjameel\Texto\Webhooks\Concerns\ValidatesTelnyxSignature;
@@ -17,8 +18,12 @@ class TelnyxWebhookHandler implements WebhookHandlerInterface
 {
     use ValidatesTelnyxSignature;
 
+    /** @var array<string, mixed> */
     protected array $config;
 
+    /**
+     * @param  array<string, mixed>|null  $config
+     */
     public function __construct(?array $config = null)
     {
         $this->config = $config ?? config('texto.telnyx', []);
@@ -26,20 +31,21 @@ class TelnyxWebhookHandler implements WebhookHandlerInterface
 
     public function handle(Request $request): WebhookProcessingResult
     {
-        $payload = $request->json()->all();
         $skip = config('texto.testing.skip_webhook_validation', false) && app()->environment('testing');
         if (! $skip) {
             $this->assertValidTelnyxSignature($request, $this->config);
         }
 
-        $data = $payload['data'] ?? [];
-        $eventType = isset($data['event_type']) ? strtolower((string) $data['event_type']) : null;
+        $payload = WebhookData::body($request);
+        $data = WebhookData::object($payload['data'] ?? null, 'data');
+        $rawEvent = WebhookData::text($data, 'event_type');
+        $eventType = $rawEvent !== null ? strtolower($rawEvent) : null;
         $messagePayload = $data['payload'] ?? null;
         if (! is_array($messagePayload)) {
             throw new TextoWebhookValidationException('Telnyx payload missing message data.');
         }
 
-        $direction = strtolower((string) ($messagePayload['direction'] ?? ''));
+        $direction = strtolower(WebhookData::text($messagePayload, 'direction') ?? '');
         $isInbound = $this->isInboundEvent($eventType, $direction);
 
         return $isInbound
@@ -47,16 +53,28 @@ class TelnyxWebhookHandler implements WebhookHandlerInterface
             : $this->mapStatusPayload($messagePayload, $eventType);
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     */
     protected function mapInboundPayload(array $payload, ?string $eventType): WebhookProcessingResult
     {
         $fromRaw = $payload['from']['phone_number'] ?? null;
         $toRaw = $payload['to'][0]['phone_number'] ?? ($payload['to']['phone_number'] ?? null);
         $from = $this->parsePhoneOrFail($fromRaw, 'from');
         $to = $this->parsePhoneOrFail($toRaw, 'to');
-        $text = $payload['text'] ?? null;
-        $media = is_array($payload['media'] ?? null) ? $payload['media'] : [];
-        $providerId = $payload['id'] ?? null;
-        $metadata = [];
+        $text = WebhookData::text($payload, 'text');
+        $mediaItems = WebhookData::items($payload['media'] ?? [], 'media');
+        $media = [];
+        foreach ($mediaItems as $item) {
+            if (is_string($item)) {
+                $media[] = $item;
+            } else {
+                $entry = WebhookData::object($item, 'media item');
+                $media[] = WebhookData::text($entry, 'url', true);
+            }
+        }
+        $providerId = WebhookData::text($payload, 'id', true);
+        $metadata = $mediaItems !== [] ? ['media' => $mediaItems] : [];
         if ($eventType) {
             $metadata['event_type'] = $eventType;
         }
@@ -67,9 +85,12 @@ class TelnyxWebhookHandler implements WebhookHandlerInterface
         return WebhookProcessingResult::inbound(Driver::Telnyx, $from, $to, $text, $media, $metadata, $providerId);
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     */
     protected function mapStatusPayload(array $payload, ?string $eventType): WebhookProcessingResult
     {
-        $providerId = $payload['id'] ?? ($payload['message_id'] ?? null);
+        $providerId = WebhookData::text($payload, 'id') ?? WebhookData::text($payload, 'message_id', true);
         $rawStatus = $this->extractRawStatus($payload);
         $status = StatusMapper::map(Driver::Telnyx, $rawStatus, $eventType);
         $metadata = [];
@@ -90,9 +111,9 @@ class TelnyxWebhookHandler implements WebhookHandlerInterface
         return WebhookProcessingResult::status(Driver::Telnyx, $providerId, $status, $metadata);
     }
 
-    protected function parsePhoneOrFail(?string $raw, string $field): PhoneNumber
+    protected function parsePhoneOrFail(mixed $raw, string $field): PhoneNumber
     {
-        if (! $raw) {
+        if (! is_string($raw) || $raw === '') {
             throw new TextoWebhookValidationException("Telnyx payload missing {$field} phone number.");
         }
         try {
@@ -111,6 +132,9 @@ class TelnyxWebhookHandler implements WebhookHandlerInterface
         return $direction === 'inbound';
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     */
     protected function extractRawStatus(array $payload): ?string
     {
         if (isset($payload['status']) && is_string($payload['status'])) {
@@ -130,7 +154,10 @@ class TelnyxWebhookHandler implements WebhookHandlerInterface
         return null;
     }
 
-    /** @return array<int, array<string, string>> */
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<int, array<string, string>>
+     */
     protected function extractRecipientMetadata(array $payload): array
     {
         $to = $payload['to'] ?? null;

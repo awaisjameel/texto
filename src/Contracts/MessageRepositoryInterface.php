@@ -11,7 +11,8 @@ use Awaisjameel\Texto\ValueObjects\WebhookProcessingResult;
 
 interface MessageRepositoryInterface
 {
-    public function storeSent(SentMessageResult $result): Message;
+    /** @param array<string, mixed>|null $configuration */
+    public function storeSent(SentMessageResult $result, ?array $configuration = null): Message;
 
     public function storeInbound(WebhookProcessingResult $result): Message;
 
@@ -29,6 +30,7 @@ interface MessageRepositoryInterface
      *
      * @param  int  $id  Message ID
      * @param  SentMessageResult  $result  Updated result
+     * @param  array<string, mixed>|null  $configuration
      */
-    public function upgradeQueued(int $id, SentMessageResult $result): ?Message;
+    public function upgradeQueued(int $id, SentMessageResult $result, ?array $configuration = null): ?Message;
 }

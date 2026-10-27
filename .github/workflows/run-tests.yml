@@ -1,13 +1,9 @@
-name: run-tests
+name: Package checks
 
-on:
-  push:
-    paths:
-      - '**.php'
-      - '.github/workflows/run-tests.yml'
-      - 'phpunit.xml.dist'
-      - 'composer.json'
-      - 'composer.lock'
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,33 +12,34 @@ concurrency:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    timeout-minutes: 15
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        php: [8.4, 8.3]
-        laravel: [13.*, 12.*, 11.*]
+        php: ['8.2', '8.3', '8.4', '8.5']
+        laravel: [13.*, 12.*]
         stability: [prefer-lowest, prefer-stable]
         include:
           - laravel: 13.*
             testbench: 11.*
           - laravel: 12.*
             testbench: 10.*
-          - laravel: 11.*
-            testbench: 9.*
+        exclude:
+          - laravel: 13.*
+            php: '8.2'
 
     name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.stability }} - ${{ matrix.os }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, soap, intl, gd, exif, iconv, imagick, fileinfo
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, soap, intl, gd, exif, iconv, imagick, fileinfo, sodium
           coverage: none
 
       - name: Setup problem matchers
@@ -60,3 +57,22 @@ jobs:
 
       - name: Execute tests
         run: vendor/bin/pest --ci
+
+      - name: Audit dependencies
+        run: composer audit --no-interaction
+
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: dom, curl, mbstring, zip, pdo_sqlite, fileinfo, sodium
+          coverage: none
+      - uses: ramsey/composer-install@v4
+      - run: composer validate --strict
+      - run: vendor/bin/pint --test
+      - run: vendor/bin/phpstan analyse --no-progress
+      - run: composer audit --no-interaction

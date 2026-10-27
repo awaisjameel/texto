@@ -15,7 +15,8 @@ class WhatsappApiException extends Exception
         public ?string $graphCode = null,
         public ?string $graphSubcode = null,
         public array $context = [],
+        ?\Throwable $previous = null,
     ) {
-        parent::__construct($message, $status);
+        parent::__construct($message, $status, $previous);
     }
 }
